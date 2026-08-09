@@ -47,6 +47,11 @@ class Config {
 
   static String get dbPath => env['DB_PATH'] ?? 'data/pozzy.db';
 
+  static String get botUsername => env['BOT_USERNAME']?.trim() ?? '';
+
+  static double get referralPurchasePercent =>
+      double.tryParse(env['REFERRAL_PURCHASE_PERCENT'] ?? '') ?? 0.15;
+
   static String get initialAdminTelegramIdsRaw => env['ADMIN_IDS']?.trim() ?? '';
 
   static bool get botVerboseLogging => 

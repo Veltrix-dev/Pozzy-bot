@@ -7,6 +7,7 @@ abstract final class Emoji {
   static String get ton => HtmlFormat.emoji(PremiumEmojiIds.ton, '💎');
   static String get premium => HtmlFormat.emoji(PremiumEmojiIds.premium, '⭐');
   static String get profile => HtmlFormat.emoji(PremiumEmojiIds.profile, '👤');
+  static String get profile2 => HtmlFormat.emoji(PremiumEmojiIds.profile2, '👤');
   static String get deletedGifts => HtmlFormat.emoji(PremiumEmojiIds.remotegifts, '🧸');
   static String get promoCode => HtmlFormat.emoji(PremiumEmojiIds.promoCode, '⭐');
   static String get checks => HtmlFormat.emoji(PremiumEmojiIds.check, '💰');

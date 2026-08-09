@@ -30,7 +30,7 @@ class User {
       username: map['username'] as String?,
       role: UserRoles.normalize(map['role'] as String?),
       referralCode: map['referral_code'] as String? ?? '',
-      referredByTelegramId: map['reffered_by_telegram'] as int?,
+      referredByTelegramId: map['referred_by_telegram_id'] as int?,
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt: DateTime.parse(map['updated_at'] as String),
     );
@@ -64,8 +64,8 @@ class User {
         'telegram_id': telegramId,
         'username': username,
         'role': role,
-        'refferal_code': referralCode,
-        'reffered_by_telegram': referredByTelegramId,
+        'referral_code': referralCode,
+        'referred_by_telegram_id': referredByTelegramId,
         'created_at': createdAt.toIso8601String(),
         'updated_at': updatedAt.toIso8601String()
       };

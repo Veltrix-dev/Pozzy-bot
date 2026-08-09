@@ -4,6 +4,7 @@ static const telegramStars ='5453969572354878595';
 static const premium = '5219899949281453881';
 static const ton = '5424912684078348533';
 static const profile = '5433776470080107054';
+static const profile2 = '5364052602357044385';
 static const remotegifts = '5258079378159453410';
 static const promoCode = '5341684837881235158';
 static const check = '5904359114531675993';

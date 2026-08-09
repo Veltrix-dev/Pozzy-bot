@@ -49,6 +49,36 @@ static void _migrate(Database db) {
       created_at TEXT NOT NULL
     );
   ''');
+
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS referral_purchase_commissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      referrer_telegram_id INTEGER NOT NULL,
+      referral_telegram_id INTEGER NOT NULL,
+      purchase_id TEXT NOT NULL UNIQUE,
+      purchase_amount REAL NOT NULL,
+      commission_amount REAL NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  ''');
+
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS user_statistics (
+      telegram_id INTEGER PRIMARY KEY,
+      purchases_count INTEGER NOT NULL DEFAULT 0,
+      purchases_total REAL NOT NULL DEFAULT 0,
+      referral_commission_total REAL NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+  ''');
+
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS user_balances (
+      telegram_id INTEGER PRIMARY KEY,
+      balance     REAL    NOT NULL DEFAULT 0,
+      updated_at  TEXT    NOT NULL
+    );
+  ''');
 }
 
 }

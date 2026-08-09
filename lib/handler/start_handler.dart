@@ -1,22 +1,38 @@
 import 'package:pozzy_bot/app/labels/message/mainMenu/start_message.dart';
 import 'package:pozzy_bot/handler/reply_handler.dart';
+import 'package:pozzy_bot/services/referral_service.dart';
 import 'package:pozzy_bot/services/user_service.dart';
 import 'package:televerse/televerse.dart';
 
 class StartHandler {
-  StartHandler(this._users, this._reply);
+  StartHandler(this._users, this._reply, this._referrals);
 
   final UserService _users;
   final ReplyHandler _reply;
+  final ReferralService _referrals;
 
   Future<void> onStart(Context ctx)  async {
    final from = ctx.from;
    if(from == null) return;
    
-   await _users.getOrCreate(
+   final user = await _users.getOrCreate(
     telegramId: from.id,
     username: from.username,
    );
+   if (user == null) return;
+
+   final payload = ctx.message?.text?.split(RegExp(r'\s+')).skip(1).join(' ');
+   if (payload != null && payload.trim().isNotEmpty) {
+    final referralCode = ReferralService.parseReferralCodeFromStartPayload(
+      payload.trim(),
+    );
+    if (referralCode != null) {
+      await _referrals.registerReferral(
+        referralTelegramId: from.id,
+        referralCode: referralCode,
+      );
+    }
+   }
 
    await showMainMenu(ctx.id);
   }
