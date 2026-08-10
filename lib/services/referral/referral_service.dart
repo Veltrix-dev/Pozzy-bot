@@ -2,19 +2,23 @@ import 'package:pozzy_bot/database/models/referral_stats.dart';
 import 'package:pozzy_bot/database/models/user.dart';
 import 'package:pozzy_bot/database/repositories/referral_repository.dart';
 import 'package:pozzy_bot/database/repositories/user_repositories.dart';
+import 'package:pozzy_bot/services/referral/referral_notification_service.dart';
 
 class ReferralService {
   ReferralService({
     required ReferralRepository repo,
     required UserRepositories users,
     required String botUsername,
+    ReferralNotificationService? notifications,
   }) : _repo = repo,
        _users = users,
-       _botUsername = botUsername;
+       _botUsername = botUsername,
+       _notifications = notifications;
 
   final ReferralRepository _repo;
   final UserRepositories _users;
   final String _botUsername;
+  final ReferralNotificationService? _notifications;
 
   static const startPayloadPrefix = 'ref_';
 
@@ -28,24 +32,37 @@ class ReferralService {
 
   Future<ReferralRegisterResult> registerReferral({
     required int referralTelegramId,
+    String? referralUsername,
     required String referralCode,
   }) async {
-    return _repo.tryRegisterReferral(
+    final result = _repo.tryRegisterReferral(
       referralTelegramId: referralTelegramId,
       referralCode: referralCode,
     );
+    if (result.isSuccess && result.referrerTelegramId != null) {
+      await _notifications?.notifyNewReferral(
+        referrerTelegramId: result.referrerTelegramId!,
+        referralTelegramId: referralTelegramId,
+        referralUsername: referralUsername,
+      );
+    }
+    return result;
   }
 
-  ReferralPurchaseCommissionResult? creditPurchaseCommission({
+  Future<ReferralPurchaseCommissionResult?> creditPurchaseCommission({
     required int referralTelegramId,
     required String purchaseId,
     required double purchaseAmount,
-  }) {
-    return _repo.tryCreditPurchaseCommission(
+  }) async {
+    final result = _repo.tryCreditPurchaseCommission(
       referralTelegramId: referralTelegramId,
       purchaseId: purchaseId,
       purchaseAmount: purchaseAmount,
     );
+    if (result != null && result.wasCredited) {
+      await _notifications?.notifyPurchaseCommission(result);
+    }
+    return result;
   }
 
   ReferralStats statsForUser(User user) {

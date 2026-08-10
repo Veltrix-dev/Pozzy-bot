@@ -10,14 +10,14 @@ class ProfileMenuKeyboard {
         InlineKeyboardButton(
           text: ProfileButtons.referrals,
           callbackData: ProfileCallbacks.referrals,
-          iconCustomEmojiId: PremiumEmojiIds.profile,
+          iconCustomEmojiId: PremiumEmojiIds.profile2,
         ),
       ],
       [
         InlineKeyboardButton(
           text: ProfileButtons.statistics,
           callbackData: ProfileCallbacks.statistics,
-          iconCustomEmojiId: PremiumEmojiIds.check,
+          iconCustomEmojiId: PremiumEmojiIds.statistics,
         ),
       ],
     ],

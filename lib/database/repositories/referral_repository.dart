@@ -120,6 +120,7 @@ class ReferralRepository {
           referralTelegramId: row['referral_telegram_id'] as int,
           purchaseAmount: (row['purchase_amount'] as num).toDouble(),
           commissionAmount: (row['commission_amount'] as num).toDouble(),
+          wasCredited: false,
         );
       }
 
@@ -178,6 +179,7 @@ class ReferralRepository {
         referralTelegramId: referralTelegramId,
         purchaseAmount: purchaseAmount,
         commissionAmount: commission,
+        wasCredited: true,
       );
     } catch (_) {
       _db.execute('ROLLBACK;');

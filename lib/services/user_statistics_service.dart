@@ -13,7 +13,18 @@ class UserStatisticsService {
   void recordPurchase({
     required int telegramId,
     required double amount,
+    String? purchaseId,
+    String? purchaseType,
+    double? quantity,
+    DateTime? purchasedAt,
   }) {
-    _repo.recordPurchase(telegramId: telegramId, amount: amount);
+    _repo.recordPurchase(
+      telegramId: telegramId,
+      amount: amount,
+      purchaseId: purchaseId,
+      purchaseType: purchaseType,
+      quantity: quantity,
+      purchasedAt: purchasedAt,
+    );
   }
 }
