@@ -28,6 +28,7 @@ class UserStatistics {
     this.starsPurchases = const [],
     this.premiumPurchases = const [],
     this.tonPurchases = const [],
+    this.giftPurchases = const [],
   });
 
   final int telegramId;
@@ -38,6 +39,7 @@ class UserStatistics {
   final List<UserPurchaseEntry> starsPurchases;
   final List<UserPurchaseEntry> premiumPurchases;
   final List<UserPurchaseEntry> tonPurchases;
+  final List<UserPurchaseEntry> giftPurchases;
 
   factory UserStatistics.empty(int telegramId) {
     return UserStatistics(
@@ -54,6 +56,7 @@ class UserStatistics {
     List<UserPurchaseEntry> starsPurchases = const [],
     List<UserPurchaseEntry> premiumPurchases = const [],
     List<UserPurchaseEntry> tonPurchases = const [],
+    List<UserPurchaseEntry> giftPurchases = const [],
   }) {
     return UserStatistics(
       telegramId: map['telegram_id'] as int,
@@ -65,6 +68,7 @@ class UserStatistics {
       starsPurchases: starsPurchases,
       premiumPurchases: premiumPurchases,
       tonPurchases: tonPurchases,
+      giftPurchases: giftPurchases,
     );
   }
 }

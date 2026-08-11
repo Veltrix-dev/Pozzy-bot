@@ -24,4 +24,18 @@ abstract final class PremiumEmojiIds {
   static const referrals = '6032594876506312598';
   static const referralsBalance = '5890848474563352982';
   static const send = '5258079378159453410';
+  static const gram = '5296742257146241213';
+  static const sad = '5832618763958095771';
+  static const back = '5352759161945867747';
+  static const scull = '5357592447557848986';
+  static const checkMark = '5138961449502115564';
+
+  static const bear1 = '5447213743417105726';
+  static const bear2 = '5393309541620291208';
+  static const bear3 = '5359736160224586485';
+  static const bear4 = '5317000922096769303';
+  static const bear5 = '5289761157173775507';
+  static const bear6 = '5226661632259691727';
+  static const bear7 = '5379850840691476775';
+  static const bear8 = '5397583403447000427';
 }

@@ -38,6 +38,7 @@ abstract final class StatisticsMenuText {
         ..._starsLines(stats.starsPurchases),
         ..._premiumLines(stats.premiumPurchases),
         ..._tonLines(stats.tonPurchases),
+        ..._giftLines(stats.giftPurchases),
       ]),
     ];
 
@@ -74,6 +75,17 @@ abstract final class StatisticsMenuText {
       else
         for (final purchase in purchases)
           '${DateFormatter.shortDate(purchase.purchasedAt)} · ${_quantity(purchase.quantity)} TON · ${_usd(purchase.spentUsd)}',
+    ];
+  }
+
+  static List<String> _giftLines(List<UserPurchaseEntry> purchases) {
+    return [
+      '${_emoji(PremiumEmojiIds.remotegifts)} Подарки:',
+      if (purchases.isEmpty)
+        'Пока нет покупок'
+      else
+        for (final purchase in purchases)
+          '${DateFormatter.shortDate(purchase.purchasedAt)} · 1 подарок · ${_usd(purchase.spentUsd)}',
     ];
   }
 

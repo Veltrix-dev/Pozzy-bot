@@ -1,5 +1,6 @@
 abstract class Callback {
   static const prefix = 'main:';
+  static const mainMenu = 'main:menu';
   static const profile = 'main:profile';
   static const buyStars = 'main:buy_stars';
   static const buyTon = 'main:buy_ton';

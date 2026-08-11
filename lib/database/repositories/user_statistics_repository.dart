@@ -1,5 +1,6 @@
 import 'package:pozzy_bot/database/database.dart';
 import 'package:pozzy_bot/database/models/user_statistics.dart';
+import 'package:pozzy_bot/database/models/gift_purchase_statuses.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 class UserStatisticsRepository {
@@ -19,6 +20,7 @@ class UserStatisticsRepository {
     final starsPurchases = purchases[UserPurchaseTypes.stars] ?? const [];
     final premiumPurchases = purchases[UserPurchaseTypes.premium] ?? const [];
     final tonPurchases = purchases[UserPurchaseTypes.ton] ?? const [];
+    final giftPurchases = _findGiftPurchases(telegramId);
 
     if (rows.isEmpty) {
       return UserStatistics(
@@ -30,6 +32,7 @@ class UserStatisticsRepository {
         starsPurchases: starsPurchases,
         premiumPurchases: premiumPurchases,
         tonPurchases: tonPurchases,
+        giftPurchases: giftPurchases,
       );
     }
     return UserStatistics.fromMap(
@@ -37,6 +40,7 @@ class UserStatisticsRepository {
       starsPurchases: starsPurchases,
       premiumPurchases: premiumPurchases,
       tonPurchases: tonPurchases,
+      giftPurchases: giftPurchases,
     );
   }
 
@@ -135,5 +139,26 @@ class UserStatisticsRepository {
           );
     }
     return purchases;
+  }
+
+  List<UserPurchaseEntry> _findGiftPurchases(int telegramId) {
+    final rows = _db.select(
+      '''
+      SELECT price_usd, updated_at
+      FROM gift_purchases
+      WHERE buyer_telegram_id = ? AND status = ?
+      ORDER BY updated_at DESC;
+      ''',
+      [telegramId, GiftPurchaseStatuses.completed],
+    );
+    return rows
+        .map(
+          (row) => UserPurchaseEntry(
+            purchasedAt: DateTime.parse(row['updated_at'] as String),
+            quantity: 1,
+            spentUsd: (row['price_usd'] as num).toDouble(),
+          ),
+        )
+        .toList();
   }
 }

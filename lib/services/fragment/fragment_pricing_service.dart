@@ -1,0 +1,172 @@
+import 'package:pozzy_bot/config/config.dart';
+import 'package:pozzy_bot/database/models/fragment_purchase_type.dart';
+import 'package:pozzy_bot/database/models/ton_amount.dart';
+import 'package:pozzy_bot/database/models/usd_amount.dart';
+import 'package:pozzy_bot/services/fragment/fragment_api_exception.dart';
+import 'package:pozzy_bot/services/fragment_stars_api/fragment_stars_price_client.dart';
+import 'package:pozzy_bot/services/fragment_stars_api/fragment_stars_price_exception.dart';
+import 'package:pozzy_bot/services/fragment_stars_api/fragment_stars_price_gateway.dart';
+import 'package:pozzy_bot/utils/bot_log.dart';
+
+class FragmentPriceQuote {
+  const FragmentPriceQuote({
+    required this.purchaseType,
+    required this.quantityUnits,
+    required this.price,
+    this.unitPrice,
+    this.basePrice,
+    this.markupAmount,
+  });
+
+  final FragmentPurchaseType purchaseType;
+  final int quantityUnits;
+  final UsdAmount price;
+  final UsdAmount? unitPrice;
+  final UsdAmount? basePrice;
+  final UsdAmount? markupAmount;
+}
+
+class FragmentPricingService {
+  FragmentPricingService({
+    String? starPriceUsd,
+    String? starsMarkupPercent,
+    String? tonPriceUsd,
+    Map<int, String>? premiumPricesUsd,
+    FragmentStarsPriceGateway? starsPriceGateway,
+  }) : _starPriceUsd = starPriceUsd,
+       _starsMarkupPercent = starsMarkupPercent,
+       _tonPriceUsd = tonPriceUsd,
+       _premiumPricesUsd = premiumPricesUsd,
+       _starsPriceGateway =
+           starsPriceGateway ??
+           FragmentStarsPriceClient(
+             baseUri: Uri.parse(Config.fragmentStarsApiBaseUrl),
+             timeout: Duration(seconds: Config.fragmentStarsApiTimeoutSeconds),
+             cacheTtl: Duration(seconds: Config.fragmentStarsPriceCacheSeconds),
+           );
+
+  final String? _starPriceUsd;
+  final String? _starsMarkupPercent;
+  final String? _tonPriceUsd;
+  final Map<int, String>? _premiumPricesUsd;
+  final FragmentStarsPriceGateway _starsPriceGateway;
+
+  Future<UsdAmount> getStarUnitPrice() async {
+    final override = _starPriceUsd;
+    if (override != null) {
+      return _configuredUsd(override, 'starPriceUsd');
+    }
+
+    try {
+      return await _starsPriceGateway.getUsdPerStar();
+    } on FragmentStarsPriceException catch (error) {
+      final fallback = Config.fragmentStarPriceUsdRaw;
+      if (fallback.isNotEmpty) {
+        BotLog.error(
+          'fragment_stars_price_failed fallback=FRAGMENT_STAR_PRICE_USD '
+          'status=${error.statusCode ?? 'none'} network=${error.isNetworkError}',
+        );
+        return _configuredUsd(fallback, 'FRAGMENT_STAR_PRICE_USD');
+      }
+      throw FragmentApiException(
+        kind: _priceErrorKind(error),
+        message: error.message,
+        statusCode: error.statusCode,
+      );
+    }
+  }
+
+  Future<FragmentPriceQuote> quoteStars(int amount) async {
+    if (amount < 50 || amount > 1000000) {
+      throw const FragmentApiException(
+        kind: FragmentApiErrorKind.configuration,
+        message: 'Stars amount must be between 50 and 1000000',
+      );
+    }
+    final unitPrice = await getStarUnitPrice();
+    final basePrice = unitPrice.multiply(amount);
+    final markupPercent =
+        _starsMarkupPercent ?? Config.fragmentStarsMarkupPercentRaw;
+    final markupAmount = _markup(basePrice, markupPercent);
+    return FragmentPriceQuote(
+      purchaseType: FragmentPurchaseType.stars,
+      quantityUnits: amount,
+      price: basePrice.add(markupAmount),
+      unitPrice: unitPrice,
+      basePrice: basePrice,
+      markupAmount: markupAmount,
+    );
+  }
+
+  FragmentPriceQuote quotePremium(int months) {
+    if (months != 3 && months != 6 && months != 12) {
+      throw const FragmentApiException(
+        kind: FragmentApiErrorKind.configuration,
+        message: 'Premium duration must be 3, 6, or 12 months',
+      );
+    }
+    final raw =
+        _premiumPricesUsd?[months] ?? Config.fragmentPremiumPriceUsdRaw(months);
+    return FragmentPriceQuote(
+      purchaseType: FragmentPurchaseType.premium,
+      quantityUnits: months,
+      price: _configuredUsd(raw, 'FRAGMENT_PREMIUM_${months}M_PRICE_USD'),
+    );
+  }
+
+  FragmentPriceQuote quoteTon(TonAmount amount) {
+    if (amount.isZero) {
+      throw const FragmentApiException(
+        kind: FragmentApiErrorKind.configuration,
+        message: 'TON amount must be greater than zero',
+      );
+    }
+    final perTon = _configuredUsd(
+      _tonPriceUsd ?? Config.fragmentTonPriceUsdRaw,
+      'FRAGMENT_TON_PRICE_USD',
+    );
+    return FragmentPriceQuote(
+      purchaseType: FragmentPurchaseType.ton,
+      quantityUnits: amount.nano,
+      price: perTon.multiplyRatio(amount.nano, TonAmount.nanoPerTon),
+    );
+  }
+
+  UsdAmount _configuredUsd(String raw, String key) {
+    if (raw.trim().isEmpty) {
+      throw FragmentApiException(
+        kind: FragmentApiErrorKind.configuration,
+        message: '$key is not configured',
+      );
+    }
+    try {
+      final amount = UsdAmount.parse(raw);
+      if (amount.isZero) throw const FormatException('Zero price');
+      return amount;
+    } on FormatException {
+      throw FragmentApiException(
+        kind: FragmentApiErrorKind.configuration,
+        message: '$key must contain a positive USD decimal',
+      );
+    }
+  }
+
+  UsdAmount _markup(UsdAmount basePrice, String rawPercent) {
+    try {
+      return basePrice.percentage(rawPercent);
+    } on FormatException {
+      throw const FragmentApiException(
+        kind: FragmentApiErrorKind.configuration,
+        message: 'FRAGMENT_STARS_MARKUP_PERCENT must be a non-negative number',
+      );
+    }
+  }
+}
+
+FragmentApiErrorKind _priceErrorKind(FragmentStarsPriceException error) {
+  if (error.isNetworkError) return FragmentApiErrorKind.network;
+  final status = error.statusCode;
+  if (status != null && status >= 500) return FragmentApiErrorKind.httpServer;
+  if (status != null) return FragmentApiErrorKind.httpClient;
+  return FragmentApiErrorKind.malformedResponse;
+}

@@ -1,12 +1,13 @@
 import 'package:pozzy_bot/config/config.dart';
 import 'package:pozzy_bot/database/database.dart';
 import 'package:pozzy_bot/database/models/referral_stats.dart';
+import 'package:pozzy_bot/database/models/usd_amount.dart';
 import 'package:pozzy_bot/database/repositories/user_balance_repository.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 class ReferralRepository {
   ReferralRepository({UserBalanceRepository? balances})
-      : _balances = balances ?? UserBalanceRepository();
+    : _balances = balances ?? UserBalanceRepository();
 
   final UserBalanceRepository _balances;
 
@@ -99,13 +100,27 @@ class ReferralRepository {
     required String purchaseId,
     required double purchaseAmount,
   }) {
-    if (purchaseAmount <= 0 || purchaseId.trim().isEmpty) return null;
+    if (purchaseAmount <= 0) return null;
+    return tryCreditPurchaseCommissionExact(
+      referralTelegramId: referralTelegramId,
+      purchaseId: purchaseId,
+      purchaseAmount: UsdAmount.fromLegacyDouble(purchaseAmount),
+    );
+  }
+
+  ReferralPurchaseCommissionResult? tryCreditPurchaseCommissionExact({
+    required int referralTelegramId,
+    required String purchaseId,
+    required UsdAmount purchaseAmount,
+  }) {
+    if (purchaseAmount.isZero || purchaseId.trim().isEmpty) return null;
 
     _db.execute('BEGIN IMMEDIATE;');
     try {
       final existing = _db.select(
         '''
-        SELECT referrer_telegram_id, referral_telegram_id, purchase_amount, commission_amount
+        SELECT referrer_telegram_id, referral_telegram_id,
+               purchase_amount_micros, commission_amount_micros
         FROM referral_purchase_commissions
         WHERE purchase_id = ?
         LIMIT 1;
@@ -118,8 +133,12 @@ class ReferralRepository {
         return ReferralPurchaseCommissionResult(
           referrerTelegramId: row['referrer_telegram_id'] as int,
           referralTelegramId: row['referral_telegram_id'] as int,
-          purchaseAmount: (row['purchase_amount'] as num).toDouble(),
-          commissionAmount: (row['commission_amount'] as num).toDouble(),
+          purchaseAmount: UsdAmount.fromMicros(
+            row['purchase_amount_micros'] as int,
+          ).toLegacyDouble(),
+          commissionAmount: UsdAmount.fromMicros(
+            row['commission_amount_micros'] as int,
+          ).toLegacyDouble(),
           wasCredited: false,
         );
       }
@@ -131,10 +150,11 @@ class ReferralRepository {
       }
 
       final now = DateTime.now().toUtc().toIso8601String();
-      final commission = _roundMoney(
-        purchaseAmount * Config.referralPurchasePercent,
+      final commission = purchaseAmount.multiplyFraction(
+        Config.referralPurchaseFractionRaw,
+        roundToCents: true,
       );
-      if (commission <= 0) {
+      if (commission.isZero) {
         _db.execute('COMMIT;');
         return null;
       }
@@ -147,15 +167,19 @@ class ReferralRepository {
           purchase_id,
           purchase_amount,
           commission_amount,
+          purchase_amount_micros,
+          commission_amount_micros,
           created_at
-        ) VALUES (?, ?, ?, ?, ?, ?);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
         ''',
         [
           referrerTelegramId,
           referralTelegramId,
           purchaseId,
-          purchaseAmount,
-          commission,
+          purchaseAmount.toLegacyDouble(),
+          commission.toLegacyDouble(),
+          purchaseAmount.micros,
+          commission.micros,
           now,
         ],
       );
@@ -167,7 +191,7 @@ class ReferralRepository {
       );
 
       // Атомарно начисляем баланс реферера в той же транзакции.
-      _balances.credit(
+      _balances.creditExact(
         telegramId: referrerTelegramId,
         amount: commission,
         now: now,
@@ -177,8 +201,8 @@ class ReferralRepository {
       return ReferralPurchaseCommissionResult(
         referrerTelegramId: referrerTelegramId,
         referralTelegramId: referralTelegramId,
-        purchaseAmount: purchaseAmount,
-        commissionAmount: commission,
+        purchaseAmount: purchaseAmount.toLegacyDouble(),
+        commissionAmount: commission.toLegacyDouble(),
         wasCredited: true,
       );
     } catch (_) {
@@ -301,7 +325,7 @@ class ReferralRepository {
 
   void _upsertStatistic({
     required int telegramId,
-    required double referralCommissionDelta,
+    required UsdAmount referralCommissionDelta,
     required String now,
   }) {
     _db.execute(
@@ -309,17 +333,21 @@ class ReferralRepository {
       INSERT INTO user_statistics (
         telegram_id,
         referral_commission_total,
+        referral_commission_total_micros,
         updated_at
-      ) VALUES (?, ?, ?)
+      ) VALUES (?, ?, ?, ?)
       ON CONFLICT(telegram_id) DO UPDATE SET
         referral_commission_total = referral_commission_total + excluded.referral_commission_total,
+        referral_commission_total_micros =
+          referral_commission_total_micros + excluded.referral_commission_total_micros,
         updated_at = excluded.updated_at;
       ''',
-      [telegramId, referralCommissionDelta, now],
+      [
+        telegramId,
+        referralCommissionDelta.toLegacyDouble(),
+        referralCommissionDelta.micros,
+        now,
+      ],
     );
-  }
-
-  static double _roundMoney(double amount) {
-    return (amount * 100).roundToDouble() / 100;
   }
 }

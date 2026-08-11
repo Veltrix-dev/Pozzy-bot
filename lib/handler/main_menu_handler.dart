@@ -3,6 +3,7 @@ import 'package:pozzy_bot/app/labels/format/percent_formatter.dart';
 import 'package:pozzy_bot/app/labels/message/profileMenu/profile_menu_text.dart';
 import 'package:pozzy_bot/app/labels/message/profileMenu/referral_text.dart';
 import 'package:pozzy_bot/app/labels/message/profileMenu/statistics_menu_text.dart';
+import 'package:pozzy_bot/app/labels/message/mainMenu/start_message.dart';
 import 'package:pozzy_bot/config/config.dart';
 import 'package:pozzy_bot/database/models/user.dart';
 import 'package:pozzy_bot/handler/reply_handler.dart';
@@ -34,6 +35,14 @@ class MainMenuHandler {
   final UserStatisticsService _statistics;
   final ReferralService _referrals;
   final BalanceService _balance;
+  final Set<int> _statisticsInProgress = {};
+  final Map<int, DateTime> _statisticsLastSentAt = {};
+
+  static const _statisticsCooldown = Duration(seconds: 3);
+
+  Future<void> onMainMenu(Context ctx) async {
+    await _reply.sendMainMenu(ctx.id, text: StartMessage.startMessage);
+  }
 
   Future<void> onNews(Context ctx) async {
     await _reply.sendMenuWithPhoto(
@@ -107,20 +116,42 @@ class MainMenuHandler {
   }
 
   Future<void> onStatistics(Context ctx) async {
-    final user = await _userFromContext(ctx);
     final from = ctx.from;
-    if (user == null || from == null) return;
+    if (from == null || !_beginStatisticsRequest(from.id)) return;
 
-    await _reply.sendRichMessageWithDraft(
-      ctx.id,
-      draftHtml: RichMessageHtml.thinking('Собираю статистику…'),
-      skipEntityDetection: true,
-      buildContent: () async => StatisticsMenuText.build(
-        user: user,
-        stats: _statistics.buildForUser(from.id),
-        referralStats: _referrals.statsForUser(user),
-      ),
-    );
+    try {
+      final user = await _userFromContext(ctx);
+      if (user == null) return;
+
+      final result = await _reply.sendRichMessageWithDraft(
+        ctx.id,
+        draftHtml: RichMessageHtml.thinking('Собираю статистику…'),
+        skipEntityDetection: true,
+        buildContent: () async => StatisticsMenuText.build(
+          user: user,
+          stats: _statistics.buildForUser(from.id),
+          referralStats: _referrals.statsForUser(user),
+        ),
+      );
+      if (result?.ok == true) {
+        _statisticsLastSentAt[from.id] = DateTime.now();
+      }
+    } finally {
+      _statisticsInProgress.remove(from.id);
+    }
+  }
+
+  bool _beginStatisticsRequest(int telegramId) {
+    if (_statisticsInProgress.contains(telegramId)) return false;
+
+    final lastSentAt = _statisticsLastSentAt[telegramId];
+    if (lastSentAt != null &&
+        DateTime.now().difference(lastSentAt) < _statisticsCooldown) {
+      return false;
+    }
+
+    _statisticsInProgress.add(telegramId);
+    return true;
   }
 
   Future<User?> _userFromContext(Context ctx) async {

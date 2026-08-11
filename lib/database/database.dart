@@ -56,6 +56,8 @@ abstract final class AppDatabase {
       purchase_id TEXT NOT NULL UNIQUE,
       purchase_amount REAL NOT NULL,
       commission_amount REAL NOT NULL,
+      purchase_amount_micros INTEGER NOT NULL DEFAULT 0,
+      commission_amount_micros INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
   ''');
@@ -66,8 +68,33 @@ abstract final class AppDatabase {
       purchases_count INTEGER NOT NULL DEFAULT 0,
       purchases_total REAL NOT NULL DEFAULT 0,
       referral_commission_total REAL NOT NULL DEFAULT 0,
+      purchases_total_micros INTEGER NOT NULL DEFAULT 0,
+      referral_commission_total_micros INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL
     );
+  ''');
+
+    db.execute('''
+    CREATE TABLE IF NOT EXISTS gift_purchases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      payment_id TEXT NOT NULL UNIQUE,
+      buyer_telegram_id INTEGER NOT NULL,
+      gift_kind TEXT NOT NULL,
+      gift_id TEXT NOT NULL,
+      price_usd REAL NOT NULL CHECK (price_usd >= 0),
+      recipient TEXT NOT NULL,
+      recipient_telegram_id INTEGER,
+      status TEXT NOT NULL,
+      error_code TEXT,
+      error_detail TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  ''');
+
+    db.execute('''
+    CREATE INDEX IF NOT EXISTS idx_gift_purchases_buyer_status
+    ON gift_purchases (buyer_telegram_id, status, updated_at DESC);
   ''');
 
     db.execute('''
@@ -80,6 +107,7 @@ abstract final class AppDatabase {
       ),
       quantity REAL NOT NULL CHECK (quantity > 0),
       spent_usd REAL NOT NULL CHECK (spent_usd >= 0),
+      spent_usd_micros INTEGER NOT NULL DEFAULT 0,
       purchased_at TEXT NOT NULL
     );
   ''');
@@ -93,8 +121,139 @@ abstract final class AppDatabase {
     CREATE TABLE IF NOT EXISTS user_balances (
       telegram_id INTEGER PRIMARY KEY,
       balance     REAL    NOT NULL DEFAULT 0,
+      balance_micros INTEGER NOT NULL DEFAULT 0,
       updated_at  TEXT    NOT NULL
     );
   ''');
+
+    _ensureUserBalanceMicrosColumn(db);
+    _ensureExactMoneyColumns(db);
+
+    db.execute('''
+    CREATE TABLE IF NOT EXISTS fragment_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id TEXT NOT NULL UNIQUE,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      buyer_telegram_id INTEGER NOT NULL,
+      purchase_type TEXT NOT NULL CHECK (
+        purchase_type IN ('stars', 'premium', 'ton')
+      ),
+      quantity_units INTEGER NOT NULL CHECK (quantity_units > 0),
+      price_usd_micros INTEGER NOT NULL CHECK (price_usd_micros > 0),
+      recipient_username TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (
+        status IN ('created', 'processing', 'completed', 'failed', 'cancelled')
+      ),
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      external_reference TEXT,
+      api_response_json TEXT,
+      error_code TEXT,
+      error_detail TEXT,
+      balance_reserved_at TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  ''');
+
+    db.execute('''
+    CREATE INDEX IF NOT EXISTS idx_fragment_orders_buyer_status
+    ON fragment_orders (buyer_telegram_id, status, updated_at DESC);
+  ''');
+
+    db.execute('''
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_fragment_orders_external_reference
+    ON fragment_orders (external_reference)
+    WHERE external_reference IS NOT NULL;
+  ''');
+  }
+
+  static void _ensureUserBalanceMicrosColumn(Database db) {
+    final columns = db.select('PRAGMA table_info(user_balances);');
+    final hasMicros = columns.any((row) => row['name'] == 'balance_micros');
+    if (!hasMicros) {
+      db.execute('''
+      ALTER TABLE user_balances
+      ADD COLUMN balance_micros INTEGER NOT NULL DEFAULT 0;
+    ''');
+    }
+    db.execute('''
+    UPDATE user_balances
+    SET balance_micros = CAST(ROUND(balance * 1000000) AS INTEGER)
+    WHERE balance_micros = 0 AND balance != 0;
+  ''');
+  }
+
+  static void _ensureExactMoneyColumns(Database db) {
+    _ensureIntegerColumn(
+      db,
+      table: 'referral_purchase_commissions',
+      column: 'purchase_amount_micros',
+    );
+    _ensureIntegerColumn(
+      db,
+      table: 'referral_purchase_commissions',
+      column: 'commission_amount_micros',
+    );
+    _ensureIntegerColumn(
+      db,
+      table: 'user_statistics',
+      column: 'purchases_total_micros',
+    );
+    _ensureIntegerColumn(
+      db,
+      table: 'user_statistics',
+      column: 'referral_commission_total_micros',
+    );
+    _ensureIntegerColumn(
+      db,
+      table: 'user_purchase_history',
+      column: 'spent_usd_micros',
+    );
+
+    db.execute('''
+    UPDATE referral_purchase_commissions
+    SET purchase_amount_micros = CAST(ROUND(purchase_amount * 1000000) AS INTEGER)
+    WHERE purchase_amount_micros = 0 AND purchase_amount != 0;
+  ''');
+    db.execute('''
+    UPDATE referral_purchase_commissions
+    SET commission_amount_micros = CAST(ROUND(commission_amount * 1000000) AS INTEGER)
+    WHERE commission_amount_micros = 0 AND commission_amount != 0;
+  ''');
+    db.execute('''
+    UPDATE user_statistics
+    SET purchases_total_micros = CAST(ROUND(purchases_total * 1000000) AS INTEGER)
+    WHERE purchases_total_micros = 0 AND purchases_total != 0;
+  ''');
+    db.execute('''
+    UPDATE user_statistics
+    SET referral_commission_total_micros =
+      CAST(ROUND(referral_commission_total * 1000000) AS INTEGER)
+    WHERE referral_commission_total_micros = 0
+      AND referral_commission_total != 0;
+  ''');
+    db.execute('''
+    UPDATE user_purchase_history
+    SET spent_usd_micros = CAST(ROUND(spent_usd * 1000000) AS INTEGER)
+    WHERE spent_usd_micros = 0 AND spent_usd != 0;
+  ''');
+  }
+
+  static void _ensureIntegerColumn(
+    Database db, {
+    required String table,
+    required String column,
+  }) {
+    final columns = db.select('PRAGMA table_info($table);');
+    if (columns.any((row) => row['name'] == column)) return;
+    db.execute(
+      'ALTER TABLE $table ADD COLUMN $column INTEGER NOT NULL DEFAULT 0;',
+    );
+  }
+
+  static void close() {
+    _db?.close();
+    _db = null;
   }
 }

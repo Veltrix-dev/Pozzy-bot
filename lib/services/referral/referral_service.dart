@@ -1,5 +1,6 @@
 import 'package:pozzy_bot/database/models/referral_stats.dart';
 import 'package:pozzy_bot/database/models/user.dart';
+import 'package:pozzy_bot/database/models/usd_amount.dart';
 import 'package:pozzy_bot/database/repositories/referral_repository.dart';
 import 'package:pozzy_bot/database/repositories/user_repositories.dart';
 import 'package:pozzy_bot/services/referral/referral_notification_service.dart';
@@ -55,6 +56,22 @@ class ReferralService {
     required double purchaseAmount,
   }) async {
     final result = _repo.tryCreditPurchaseCommission(
+      referralTelegramId: referralTelegramId,
+      purchaseId: purchaseId,
+      purchaseAmount: purchaseAmount,
+    );
+    if (result != null && result.wasCredited) {
+      await _notifications?.notifyPurchaseCommission(result);
+    }
+    return result;
+  }
+
+  Future<ReferralPurchaseCommissionResult?> creditPurchaseCommissionExact({
+    required int referralTelegramId,
+    required String purchaseId,
+    required UsdAmount purchaseAmount,
+  }) async {
+    final result = _repo.tryCreditPurchaseCommissionExact(
       referralTelegramId: referralTelegramId,
       purchaseId: purchaseId,
       purchaseAmount: purchaseAmount,

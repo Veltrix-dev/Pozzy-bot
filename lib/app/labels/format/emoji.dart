@@ -24,7 +24,6 @@ abstract final class Emoji {
   static String get lightning =>
       HtmlFormat.emoji(PremiumEmojiIds.lightning, '⚡');
   static String get down => HtmlFormat.emoji(PremiumEmojiIds.down, '⚡');
-
   static String get menu => HtmlFormat.emoji(PremiumEmojiIds.menu, '🎲');
   static String get earned => HtmlFormat.emoji(PremiumEmojiIds.earned, '💰');
   static String get balance => HtmlFormat.emoji(PremiumEmojiIds.balance, '💰');
@@ -39,4 +38,9 @@ abstract final class Emoji {
   static String get referralsBalance =>
       HtmlFormat.emoji(PremiumEmojiIds.referralsBalance, '👥');
   static String get send => HtmlFormat.emoji(PremiumEmojiIds.send, '✈️');
+  static String get back => HtmlFormat.emoji(PremiumEmojiIds.back, '🔙');
+  static String get sad => HtmlFormat.emoji(PremiumEmojiIds.sad, '😢');
+  static String get scull => HtmlFormat.emoji(PremiumEmojiIds.scull, '💀');
+  static String get checkMark =>
+      HtmlFormat.emoji(PremiumEmojiIds.checkMark, '✅');
 }

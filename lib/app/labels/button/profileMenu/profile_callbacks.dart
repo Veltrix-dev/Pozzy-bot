@@ -1,6 +1,7 @@
 abstract final class ProfileCallbacks {
   static const prefix = 'profile:';
   static const referrals = 'profile:referrals';
+  static const withdrawBalance = 'profile:withdraw_balance';
   static const referralsList = 'profile:referrals_list';
   static const statistics = 'profile:statistics';
 
