@@ -111,6 +111,15 @@ class Config {
   static String get fragmentTonPriceUsdRaw =>
       env['FRAGMENT_TON_PRICE_USD']?.trim() ?? '';
 
+  static String get exchangeRateApiKey =>
+      env['EXCHANGE_RATE_API_KEY']?.trim() ?? '';
+
+  static int get exchangeRateApiTimeoutSeconds =>
+      int.tryParse(env['EXCHANGE_RATE_API_TIMEOUT_SECONDS'] ?? '') ?? 15;
+
+  static int get exchangeRateCacheSeconds =>
+      int.tryParse(env['EXCHANGE_RATE_CACHE_SECONDS'] ?? '') ?? 600;
+
   static String fragmentPremiumPriceUsdRaw(int months) =>
       env['FRAGMENT_PREMIUM_${months}M_PRICE_USD']?.trim() ?? '';
 
