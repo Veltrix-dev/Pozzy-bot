@@ -4,6 +4,7 @@
 .pub/
 build/
 coverage/
+test/
 
 # Local configuration and secrets
 .env

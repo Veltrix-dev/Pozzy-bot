@@ -166,6 +166,32 @@ abstract final class AppDatabase {
     ON fragment_orders (external_reference)
     WHERE external_reference IS NOT NULL;
   ''');
+
+    db.execute('''
+    CREATE TABLE IF NOT EXISTS fragment_star_price_cache (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      usd_per_star_micros INTEGER NOT NULL CHECK (usd_per_star_micros > 0),
+      fetched_at TEXT NOT NULL
+    );
+  ''');
+
+    db.execute('''
+    CREATE TABLE IF NOT EXISTS usd_rub_exchange_rate (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      rate_micros INTEGER NOT NULL CHECK (rate_micros > 0),
+      source_updated_at TEXT NOT NULL,
+      fetched_at TEXT NOT NULL
+    );
+  ''');
+
+    db.execute('''
+    CREATE TABLE IF NOT EXISTS usd_rub_fallback_exchange_rate (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      rate_micros INTEGER NOT NULL CHECK (rate_micros > 0),
+      source_updated_at TEXT NOT NULL,
+      fetched_at TEXT NOT NULL
+    );
+  ''');
   }
 
   static void _ensureUserBalanceMicrosColumn(Database db) {

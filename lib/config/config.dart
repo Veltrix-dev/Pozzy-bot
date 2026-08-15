@@ -92,9 +92,13 @@ class Config {
   static int get fragmentPendingReviewAgeSeconds =>
       int.tryParse(env['FRAGMENT_PENDING_REVIEW_AGE_SECONDS'] ?? '') ?? 30;
 
-  static String get fragmentStarsApiBaseUrl =>
-      env['FRAGMENT_STARS_API_BASE_URL']?.trim() ??
-      'https://fragment-api.ydns.eu:8443';
+  static String get fragmentStarsApiBaseUrl {
+    final value = env['FRAGMENT_STARS_API_BASE_URL']?.trim() ?? '';
+    if (value.isEmpty) {
+      throw StateError('FRAGMENT_STARS_API_BASE_URL is not configured');
+    }
+    return value;
+  }
 
   static int get fragmentStarsApiTimeoutSeconds =>
       int.tryParse(env['FRAGMENT_STARS_API_TIMEOUT_SECONDS'] ?? '') ?? 30;
@@ -111,14 +115,35 @@ class Config {
   static String get fragmentTonPriceUsdRaw =>
       env['FRAGMENT_TON_PRICE_USD']?.trim() ?? '';
 
+  static String get twelveDataApiKey =>
+      env['TWELVE_DATA_API_KEY']?.trim() ?? '';
+
+  static String get twelveDataApiBaseUrl =>
+      env['TWELVE_DATA_API_BASE_URL']?.trim() ?? 'https://api.twelvedata.com';
+
   static String get exchangeRateApiKey =>
       env['EXCHANGE_RATE_API_KEY']?.trim() ?? '';
+
+  static String get exchangeRateApiBaseUrl =>
+      env['EXCHANGE_RATE_API_BASE_URL']?.trim() ??
+      'https://v6.exchangerate-api.com/v6';
 
   static int get exchangeRateApiTimeoutSeconds =>
       int.tryParse(env['EXCHANGE_RATE_API_TIMEOUT_SECONDS'] ?? '') ?? 15;
 
-  static int get exchangeRateCacheSeconds =>
-      int.tryParse(env['EXCHANGE_RATE_CACHE_SECONDS'] ?? '') ?? 600;
+  static int get exchangeRateRefreshSeconds =>
+      int.tryParse(env['EXCHANGE_RATE_REFRESH_SECONDS'] ?? '') ?? 300;
+
+  static int get exchangeRatePrimaryMaximumAgeSeconds =>
+      int.tryParse(env['EXCHANGE_RATE_PRIMARY_MAXIMUM_AGE_SECONDS'] ?? '') ??
+      7200;
+
+  static int get exchangeRateFallbackRefreshSeconds =>
+      int.tryParse(env['EXCHANGE_RATE_FALLBACK_REFRESH_SECONDS'] ?? '') ??
+      86400;
+
+  static int get exchangeRateFallbackRetrySeconds =>
+      int.tryParse(env['EXCHANGE_RATE_FALLBACK_RETRY_SECONDS'] ?? '') ?? 3600;
 
   static String fragmentPremiumPriceUsdRaw(int months) =>
       env['FRAGMENT_PREMIUM_${months}M_PRICE_USD']?.trim() ?? '';

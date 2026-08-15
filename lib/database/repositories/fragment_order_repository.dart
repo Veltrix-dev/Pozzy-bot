@@ -18,7 +18,6 @@ enum FragmentOrderBeginOutcome {
   started,
   alreadyProcessing,
   alreadyCompleted,
-  insufficientBalance,
   invalidStatus,
   notFound,
 }
@@ -111,36 +110,14 @@ class FragmentOrderRepository {
       final now = DateTime.now().toUtc().toIso8601String();
       _db.execute(
         '''
-        UPDATE user_balances
-        SET balance = (balance_micros - ?) / 1000000.0,
-            balance_micros = balance_micros - ?,
-            updated_at = ?
-        WHERE telegram_id = ? AND balance_micros >= ?;
-        ''',
-        [
-          order.price.micros,
-          order.price.micros,
-          now,
-          order.buyerTelegramId,
-          order.price.micros,
-        ],
-      );
-      if (_db.updatedRows == 0) {
-        _db.execute('ROLLBACK;');
-        return FragmentOrderBeginOutcome.insufficientBalance;
-      }
-
-      _db.execute(
-        '''
         UPDATE fragment_orders
         SET status = ?, attempt_count = attempt_count + 1,
-            balance_reserved_at = ?, error_code = NULL, error_detail = NULL,
+            balance_reserved_at = NULL, error_code = NULL, error_detail = NULL,
             updated_at = ?
         WHERE order_id = ? AND status = ?;
         ''',
         [
           FragmentOrderStatus.processing.databaseValue,
-          now,
           now,
           orderId,
           FragmentOrderStatus.created.databaseValue,

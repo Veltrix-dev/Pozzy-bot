@@ -1,10 +1,12 @@
 abstract final class PremiumEmojiIds {
   static const stars = '5453900977432188793';
   static const telegramStars = '5453969572354878595';
+  static const telegram3 = '5217890643321300022';
   static const premium = '5219899949281453881';
   static const ton = '5424912684078348533';
   static const profile = '5433776470080107054';
   static const profile2 = '5364052602357044385';
+  static const profile3 = '5203977968644288289';
   static const remotegifts = '5258079378159453410';
   static const promoCode = '5341684837881235158';
   static const check = '5904359114531675993';
@@ -20,7 +22,6 @@ abstract final class PremiumEmojiIds {
   static const time = '5258113901106580375';
   static const boxstars = '5773677501825945508';
   static const link = '5454419255430767770';
-  static const profile3 = '5433776470080107054';
   static const referrals = '6032594876506312598';
   static const referralsBalance = '5890848474563352982';
   static const send = '5258079378159453410';
@@ -29,6 +30,9 @@ abstract final class PremiumEmojiIds {
   static const back = '5352759161945867747';
   static const scull = '5357592447557848986';
   static const checkMark = '5138961449502115564';
+  static const exclamationMark = '5220197908342648622';
+  static const exclamationMark2 = '5258123680747116087';
+  static const plus = '5393194986252542669';
 
   static const bear1 = '5447213743417105726';
   static const bear2 = '5393309541620291208';

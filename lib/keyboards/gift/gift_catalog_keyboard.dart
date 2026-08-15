@@ -19,7 +19,6 @@ class GiftCatalogKeyboard {
           text: 'Назад',
           callbackData: Callback.mainMenu,
           iconCustomEmojiId: PremiumEmojiIds.back,
-          style: StyleType.success,
         ),
       ],
     ],

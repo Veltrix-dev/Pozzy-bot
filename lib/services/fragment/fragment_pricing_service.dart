@@ -6,6 +6,7 @@ import 'package:pozzy_bot/services/fragment/fragment_api_exception.dart';
 import 'package:pozzy_bot/services/fragment_stars_api/fragment_stars_price_client.dart';
 import 'package:pozzy_bot/services/fragment_stars_api/fragment_stars_price_exception.dart';
 import 'package:pozzy_bot/services/fragment_stars_api/fragment_stars_price_gateway.dart';
+import 'package:pozzy_bot/services/fragment_stars_api/fragment_star_price_store.dart';
 import 'package:pozzy_bot/utils/bot_log.dart';
 
 class FragmentPriceQuote {
@@ -33,10 +34,16 @@ class FragmentPricingService {
     String? tonPriceUsd,
     Map<int, String>? premiumPricesUsd,
     FragmentStarsPriceGateway? starsPriceGateway,
+    FragmentStarPriceStore? starsPriceStore,
+    String? fallbackStarPriceUsd,
+    DateTime Function()? clock,
   }) : _starPriceUsd = starPriceUsd,
        _starsMarkupPercent = starsMarkupPercent,
        _tonPriceUsd = tonPriceUsd,
        _premiumPricesUsd = premiumPricesUsd,
+       _starsPriceStore = starsPriceStore,
+       _fallbackStarPriceUsd = fallbackStarPriceUsd,
+       _clock = clock ?? DateTime.now,
        _starsPriceGateway =
            starsPriceGateway ??
            FragmentStarsPriceClient(
@@ -50,6 +57,10 @@ class FragmentPricingService {
   final String? _tonPriceUsd;
   final Map<int, String>? _premiumPricesUsd;
   final FragmentStarsPriceGateway _starsPriceGateway;
+  final FragmentStarPriceStore? _starsPriceStore;
+  final String? _fallbackStarPriceUsd;
+  final DateTime Function() _clock;
+  Future<UsdAmount>? _inFlightStarUnitPrice;
 
   Future<UsdAmount> getStarUnitPrice() async {
     final override = _starPriceUsd;
@@ -57,10 +68,37 @@ class FragmentPricingService {
       return _configuredUsd(override, 'starPriceUsd');
     }
 
+    final activeRequest = _inFlightStarUnitPrice;
+    if (activeRequest != null) return activeRequest;
+
+    final request = _resolveStarUnitPrice();
+    _inFlightStarUnitPrice = request;
     try {
-      return await _starsPriceGateway.getUsdPerStar();
+      return await request;
+    } finally {
+      if (identical(_inFlightStarUnitPrice, request)) {
+        _inFlightStarUnitPrice = null;
+      }
+    }
+  }
+
+  Future<UsdAmount> _resolveStarUnitPrice() async {
+    try {
+      final prices = await _starsPriceGateway.getPrices();
+      _saveServerPrice(prices.usdPerStar, prices.cachedAt ?? _clock().toUtc());
+      return prices.usdPerStar;
     } on FragmentStarsPriceException catch (error) {
-      final fallback = Config.fragmentStarPriceUsdRaw;
+      final stored = _loadStoredPrice();
+      if (stored != null) {
+        BotLog.error(
+          'fragment_stars_price_failed fallback=database '
+          'status=${error.statusCode ?? 'none'} network=${error.isNetworkError} '
+          'stored_at=${stored.fetchedAt.toIso8601String()}',
+        );
+        return stored.usdPerStar;
+      }
+
+      final fallback = _fallbackStarPriceUsd ?? Config.fragmentStarPriceUsdRaw;
       if (fallback.isNotEmpty) {
         BotLog.error(
           'fragment_stars_price_failed fallback=FRAGMENT_STAR_PRICE_USD '
@@ -73,6 +111,31 @@ class FragmentPricingService {
         message: error.message,
         statusCode: error.statusCode,
       );
+    }
+  }
+
+  void _saveServerPrice(UsdAmount price, DateTime fetchedAt) {
+    final store = _starsPriceStore;
+    if (store == null) return;
+    try {
+      store.save(usdPerStar: price, fetchedAt: fetchedAt);
+    } catch (error) {
+      BotLog.error(
+        'fragment_star_price_cache write_failed error=${error.runtimeType}',
+      );
+    }
+  }
+
+  StoredFragmentStarPrice? _loadStoredPrice() {
+    final store = _starsPriceStore;
+    if (store == null) return null;
+    try {
+      return store.findLast();
+    } catch (error) {
+      BotLog.error(
+        'fragment_star_price_cache read_failed error=${error.runtimeType}',
+      );
+      return null;
     }
   }
 

@@ -13,6 +13,7 @@ import 'package:pozzy_bot/services/fragment/fragment_gateway.dart';
 import 'package:pozzy_bot/services/fragment/fragment_pricing_service.dart';
 import 'package:pozzy_bot/services/referral/referral_service.dart';
 import 'package:pozzy_bot/utils/bot_log.dart';
+import 'package:pozzy_bot/utils/telegram_username.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 enum FragmentPurchaseOutcome {
@@ -21,7 +22,6 @@ enum FragmentPurchaseOutcome {
   alreadyCompleted,
   pendingConfirmation,
   purchaseInProgress,
-  insufficientBalance,
   invalidTelegramUsername,
   invalidTelegramId,
   invalidStarsAmount,
@@ -176,6 +176,20 @@ class FragmentPurchaseService {
     }
   }
 
+  Future<FragmentPurchaseResult> purchaseQuote({
+    required String idempotencyKey,
+    required int buyerTelegramId,
+    required String recipientUsername,
+    required FragmentPriceQuote quote,
+  }) {
+    return _createAndExecute(
+      idempotencyKey: idempotencyKey,
+      buyerTelegramId: buyerTelegramId,
+      recipientUsername: recipientUsername,
+      quote: quote,
+    );
+  }
+
   Future<FragmentPurchaseResult> createOrder({
     required String idempotencyKey,
     required int buyerTelegramId,
@@ -194,7 +208,7 @@ class FragmentPurchaseService {
       );
     }
 
-    final normalizedUsername = _normalizeUsername(recipientUsername);
+    final normalizedUsername = TelegramUsername.normalize(recipientUsername)!;
     try {
       final created = _orders.create(
         orderId: _newOrderId(),
@@ -351,7 +365,7 @@ class FragmentPurchaseService {
 
     try {
       final recipient = await _gateway.searchUser(order.recipientUsername);
-      if (_normalizeUsername(recipient.username).toLowerCase() !=
+      if (TelegramUsername.normalize(recipient.username) !=
           order.recipientUsername.toLowerCase()) {
         _orders.markFailedAndRefund(
           orderId: order.orderId,
@@ -392,11 +406,6 @@ class FragmentPurchaseService {
 
     final begin = _orders.tryBeginProcessing(order.orderId);
     switch (begin) {
-      case FragmentOrderBeginOutcome.insufficientBalance:
-        return FragmentPurchaseResult(
-          outcome: FragmentPurchaseOutcome.insufficientBalance,
-          order: _orders.findByOrderId(order.orderId),
-        );
       case FragmentOrderBeginOutcome.alreadyProcessing:
         return FragmentPurchaseResult(
           outcome: FragmentPurchaseOutcome.purchaseInProgress,
@@ -543,7 +552,7 @@ class FragmentPurchaseService {
   bool _receiptMatches(FragmentOrder order, FragmentPurchaseReceipt receipt) {
     return receipt.purchaseType == order.purchaseType &&
         receipt.deliveredUnits == order.quantityUnits &&
-        _normalizeUsername(receipt.username).toLowerCase() ==
+        TelegramUsername.normalize(receipt.username) ==
             order.recipientUsername.toLowerCase();
   }
 
@@ -580,7 +589,7 @@ class FragmentPurchaseService {
           existing.purchaseType == purchaseType &&
           existing.quantityUnits == quantityUnits &&
           existing.recipientUsername.toLowerCase() ==
-              _normalizeUsername(recipientUsername).toLowerCase();
+              TelegramUsername.normalize(recipientUsername);
       if (!matches) {
         return FragmentPurchaseResult(
           outcome: FragmentPurchaseOutcome.idempotencyConflict,
@@ -619,13 +628,13 @@ class FragmentPurchaseService {
         message: 'Invalid idempotency key',
       );
     }
-    final username = _normalizeUsername(recipientUsername);
-    if (RegExp(r'^\d+$').hasMatch(username)) {
+    final recipientValue = recipientUsername.trim().replaceFirst('@', '');
+    if (RegExp(r'^\d+$').hasMatch(recipientValue)) {
       return const FragmentPurchaseResult(
         outcome: FragmentPurchaseOutcome.invalidTelegramId,
       );
     }
-    if (!RegExp(r'^[A-Za-z][A-Za-z0-9_]{4,31}$').hasMatch(username)) {
+    if (TelegramUsername.normalize(recipientUsername) == null) {
       return const FragmentPurchaseResult(
         outcome: FragmentPurchaseOutcome.invalidTelegramUsername,
       );
@@ -663,11 +672,6 @@ class FragmentPurchaseService {
       return null;
     }
   }
-}
-
-String _normalizeUsername(String username) {
-  final value = username.trim();
-  return value.startsWith('@') ? value.substring(1) : value;
 }
 
 String _newOrderId() {
