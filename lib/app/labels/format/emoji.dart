@@ -44,6 +44,7 @@ abstract final class Emoji {
   static String get exclamationMark2 => HtmlFormat.emoji(PremiumEmojiIds.exclamationMark2, '😢');
   static String get plus => HtmlFormat.emoji(PremiumEmojiIds.plus, '😢');
   static String get scull => HtmlFormat.emoji(PremiumEmojiIds.scull, '💀');
+  static String get wallet => HtmlFormat.emoji(PremiumEmojiIds.wallet, '👛');
   static String get checkMark =>
       HtmlFormat.emoji(PremiumEmojiIds.checkMark, '✅');
 }

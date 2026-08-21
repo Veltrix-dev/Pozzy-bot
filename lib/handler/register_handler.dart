@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:pozzy_bot/app/labels/button/adminMenu/admin_callback.dart';
+import 'package:pozzy_bot/handler/admin/admin_panel_handler.dart';
 import 'package:pozzy_bot/handler/purchase/fragment_purchase_coordinator.dart';
 import 'package:pozzy_bot/handler/purchase/recipient/recipient_selection_handler.dart';
 import 'package:pozzy_bot/handler/purchase/stars/stars_purchase_handler.dart';
@@ -20,15 +21,22 @@ abstract final class RegisterHandler {
     required TonPurchaseHandler tonPurchase,
     required RecipientSelectionHandler recipientSelection,
     required FragmentPurchaseCoordinator purchaseCoordinator,
+    required AdminPanelHandler adminPanel,
   }) {
     bot.use(_instantCallbackAnswerMiddleware);
     bot.command('start', (ctx) async {
+      adminPanel.cancelForUser(ctx.from?.id);
       purchaseCoordinator.cancelForNavigation(ctx);
       await start.onStart(ctx);
+    });
+    bot.command('admin', (ctx) async {
+      purchaseCoordinator.cancelForNavigation(ctx);
+      await adminPanel.onAdminCommand(ctx);
     });
     bot.onCallbackQuery(callbackRouter.route);
     bot.onInlineQuery(referralInlineQuery.onInlineQuery);
     bot.onMessage((ctx) async {
+      if (await adminPanel.onAnyMessage(ctx)) return;
       if (purchaseCoordinator.onAnyMessage(ctx)) return;
       if (await starsPurchase.onAnyMessage(ctx)) return;
       if (await tonPurchase.onAnyMessage(ctx)) return;

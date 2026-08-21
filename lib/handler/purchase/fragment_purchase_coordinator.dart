@@ -9,11 +9,14 @@ class FragmentPurchaseCoordinator {
   FragmentPurchaseCoordinator({
     required ReplyHandler reply,
     required FragmentPurchaseFlowService flows,
+    DateTime Function()? clock,
   }) : _reply = reply,
-       _flows = flows;
+       _flows = flows,
+       _clock = clock ?? DateTime.now;
 
   final ReplyHandler _reply;
   final FragmentPurchaseFlowService _flows;
+  final DateTime Function() _clock;
 
   bool isBusy(int buyerTelegramId) {
     final step = _flows.find(buyerTelegramId)?.step;
@@ -36,9 +39,25 @@ class FragmentPurchaseCoordinator {
     required String idempotencyKey,
   }) async {
     final from = ctx.from;
-    if (from == null ||
-        !_flows.beginPurchase(from.id, idempotencyKey: idempotencyKey)) {
-      return;
+    if (from == null) return;
+    final begin = _flows.beginPurchase(
+      from.id,
+      idempotencyKey: idempotencyKey,
+      now: _clock(),
+    );
+    switch (begin.outcome) {
+      case FragmentPurchaseBeginOutcome.invalidState:
+        return;
+      case FragmentPurchaseBeginOutcome.quoteExpired:
+        _flows.cancel(from.id);
+        await _reply.sendText(
+          ctx.id,
+          FragmentPaymentText.quoteExpired,
+          replyMarkup: const ReplyKeyboardRemove(),
+        );
+        return;
+      case FragmentPurchaseBeginOutcome.started:
+        break;
     }
     _flows.cancel(from.id);
 

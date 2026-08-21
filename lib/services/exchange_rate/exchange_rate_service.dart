@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
 import 'package:pozzy_bot/config/config.dart';
+import 'package:pozzy_bot/database/models/rub_amount.dart';
+import 'package:pozzy_bot/database/models/usd_amount.dart';
 import 'package:pozzy_bot/services/exchange_rate/exchange_rate_exception.dart';
 import 'package:pozzy_bot/services/exchange_rate/exchange_rate_notifier.dart';
 import 'package:pozzy_bot/services/exchange_rate/exchange_rate_store.dart';
@@ -22,9 +25,18 @@ class ExchangeRateService {
     Duration timeout = const Duration(seconds: 15),
     Duration primaryRefreshInterval = const Duration(minutes: 5),
     Duration primaryMaximumAge = const Duration(hours: 2),
+    Duration primarySourceMaximumAge = const Duration(hours: 2),
     Duration fallbackRefreshInterval = const Duration(days: 1),
     Duration fallbackRetryInterval = const Duration(hours: 1),
+    Duration fallbackMaximumAge = const Duration(hours: 26),
+    Duration absoluteMaximumAge = const Duration(days: 3),
+    Duration allowedClockSkew = const Duration(minutes: 5),
+    double minimumRate = 10,
+    double maximumRate = 500,
+    double maximumChangePercent = 20,
+    double maximumProviderDifferencePercent = 10,
     DateTime Function()? clock,
+    Random? random,
   }) : _twelveDataApiKey = _validateApiKey(
          twelveDataApiKey,
          'TWELVE_DATA_API_KEY',
@@ -55,6 +67,11 @@ class ExchangeRateService {
          primaryMaximumAge,
          primaryRefreshInterval,
        ),
+       _primarySourceMaximumAge = _validateMaximumAge(
+         primarySourceMaximumAge,
+         absoluteMaximumAge,
+         'primarySourceMaximumAge',
+       ),
        _fallbackRefreshInterval = _validateDuration(
          fallbackRefreshInterval,
          'fallbackRefreshInterval',
@@ -63,7 +80,38 @@ class ExchangeRateService {
          fallbackRetryInterval,
          'fallbackRetryInterval',
        ),
-       _clock = clock ?? DateTime.now;
+       _fallbackMaximumAge = _validateMaximumAge(
+         fallbackMaximumAge,
+         absoluteMaximumAge,
+         'fallbackMaximumAge',
+       ),
+       _absoluteMaximumAge = _validateDuration(
+         absoluteMaximumAge,
+         'absoluteMaximumAge',
+       ),
+       _allowedClockSkew = _validateDuration(
+         allowedClockSkew,
+         'allowedClockSkew',
+       ),
+       _minimumRate = _validatePositiveNumber(minimumRate, 'minimumRate'),
+       _maximumRate = _validateRateMaximum(maximumRate, minimumRate),
+       _maximumChangePercent = _validatePositiveNumber(
+         maximumChangePercent,
+         'maximumChangePercent',
+       ),
+       _maximumProviderDifferencePercent = _validatePositiveNumber(
+         maximumProviderDifferencePercent,
+         'maximumProviderDifferencePercent',
+       ),
+       _clock = clock ?? DateTime.now,
+       _random = random ?? Random.secure() {
+    if (_primaryMaximumAge > _absoluteMaximumAge) {
+      throw const ExchangeRateException(
+        kind: ExchangeRateErrorKind.configuration,
+        message: 'primaryMaximumAge must not exceed absoluteMaximumAge',
+      );
+    }
+  }
 
   factory ExchangeRateService.fromConfig({
     required ExchangeRateStore store,
@@ -88,11 +136,39 @@ class ExchangeRateService {
       primaryMaximumAge: Duration(
         seconds: Config.exchangeRatePrimaryMaximumAgeSeconds,
       ),
+      primarySourceMaximumAge: Duration(
+        seconds: Config.exchangeRatePrimarySourceMaximumAgeSeconds,
+      ),
       fallbackRefreshInterval: Duration(
         seconds: Config.exchangeRateFallbackRefreshSeconds,
       ),
       fallbackRetryInterval: Duration(
         seconds: Config.exchangeRateFallbackRetrySeconds,
+      ),
+      fallbackMaximumAge: Duration(
+        seconds: Config.exchangeRateFallbackMaximumAgeSeconds,
+      ),
+      absoluteMaximumAge: Duration(
+        seconds: Config.exchangeRateAbsoluteMaximumAgeSeconds,
+      ),
+      allowedClockSkew: Duration(
+        seconds: Config.exchangeRateAllowedClockSkewSeconds,
+      ),
+      minimumRate: _parseConfiguredDouble(
+        Config.exchangeRateMinimumRaw,
+        'EXCHANGE_RATE_MIN_USD_RUB',
+      ),
+      maximumRate: _parseConfiguredDouble(
+        Config.exchangeRateMaximumRaw,
+        'EXCHANGE_RATE_MAX_USD_RUB',
+      ),
+      maximumChangePercent: _parseConfiguredDouble(
+        Config.exchangeRateMaximumChangePercentRaw,
+        'EXCHANGE_RATE_MAX_CHANGE_PERCENT',
+      ),
+      maximumProviderDifferencePercent: _parseConfiguredDouble(
+        Config.exchangeRateMaximumProviderDifferencePercentRaw,
+        'EXCHANGE_RATE_MAX_PROVIDER_DIFFERENCE_PERCENT',
       ),
       clock: clock,
     );
@@ -109,9 +185,18 @@ class ExchangeRateService {
   final Duration _timeout;
   final Duration _primaryRefreshInterval;
   final Duration _primaryMaximumAge;
+  final Duration _primarySourceMaximumAge;
   final Duration _fallbackRefreshInterval;
   final Duration _fallbackRetryInterval;
+  final Duration _fallbackMaximumAge;
+  final Duration _absoluteMaximumAge;
+  final Duration _allowedClockSkew;
+  final double _minimumRate;
+  final double _maximumRate;
+  final double _maximumChangePercent;
+  final double _maximumProviderDifferencePercent;
   final DateTime Function() _clock;
+  final Random _random;
 
   Timer? _primaryRefreshTimer;
   Timer? _fallbackRefreshTimer;
@@ -120,36 +205,81 @@ class ExchangeRateService {
   Future<void>? _fallbackRefresh;
   Future<void>? _modeUpdate;
   _ExchangeRateMode? _lastMode;
+  int _primaryFailures = 0;
+  int _fallbackFailures = 0;
+  ExchangeRateException? _lastPrimaryError;
+  ExchangeRateException? _lastFallbackError;
+  final Map<ExchangeRateSource, ExchangeRateErrorKind> _lastRejections = {};
   bool _closed = false;
 
   Future<void> start() {
     final activeStart = _startFuture;
     if (activeStart != null) return activeStart;
 
-    final start = _start();
+    final start = _startWithRetryableFailure();
     _startFuture = start;
     return start;
   }
 
-  Future<double> convertUsdToRub(double usdAmount) async {
-    _validateUsdAmount(usdAmount);
+  Future<void> _startWithRetryableFailure() async {
+    try {
+      await _start();
+    } catch (_) {
+      _startFuture = null;
+      rethrow;
+    }
+  }
+
+  Future<RubAmount> convertUsdToRub(UsdAmount usdAmount) async {
+    if (usdAmount.isZero) {
+      throw const ExchangeRateException(
+        kind: ExchangeRateErrorKind.invalidAmount,
+        message: 'USD amount must be greater than zero',
+      );
+    }
     BotLog.debug('currency_conversion requested pair=USD_RUB');
 
+    final snapshot = await getSnapshot();
+    final rubAmount = convertUsingSnapshot(usdAmount, snapshot);
+    BotLog.debug(
+      'currency_conversion completed pair=USD_RUB '
+      'source=${snapshot.source.name} mode=${snapshot.mode.name}',
+    );
+    return rubAmount;
+  }
+
+  Future<ExchangeRateSnapshot> getSnapshot() async {
     await _updateMode();
-    final selection = _selectRate();
-    final rubAmount = usdAmount * selection.rate.rate;
-    if (!rubAmount.isFinite || rubAmount <= 0) {
+    return _snapshotFromSelection(_selectRate());
+  }
+
+  RubAmount convertUsingSnapshot(
+    UsdAmount usdAmount,
+    ExchangeRateSnapshot snapshot,
+  ) => convertUsdToRubAtFixedRate(usdAmount, snapshot.rateMicros);
+
+  RubAmount convertUsdToRubAtFixedRate(UsdAmount usdAmount, int rateMicros) {
+    if (usdAmount.isZero) {
+      throw const ExchangeRateException(
+        kind: ExchangeRateErrorKind.invalidAmount,
+        message: 'USD amount must be greater than zero',
+      );
+    }
+    if (rateMicros <= 0) {
+      throw const ExchangeRateException(
+        kind: ExchangeRateErrorKind.invalidAmount,
+        message: 'USD/RUB rate must be greater than zero',
+      );
+    }
+    final product = usdAmount.micros * rateMicros;
+    final rubMicros = (product + 500000) ~/ 1000000;
+    if (rubMicros <= 0) {
       throw const ExchangeRateException(
         kind: ExchangeRateErrorKind.invalidAmount,
         message: 'USD amount is outside the supported numeric range',
       );
     }
-
-    BotLog.debug(
-      'currency_conversion completed pair=USD_RUB '
-      'source=${selection.rate.source.name}',
-    );
-    return rubAmount;
+    return RubAmount.fromMicros(rubMicros);
   }
 
   Future<void> _start() async {
@@ -157,12 +287,8 @@ class ExchangeRateService {
       'exchange_rate initialization_started pair=USD_RUB '
       'providers=twelveData,exchangeRateApi',
     );
-    final results = await Future.wait([
-      _refreshPrimarySafely(),
-      _refreshFallbackSafely(),
-    ]);
-    final primarySucceeded = results[0];
-    final fallbackSucceeded = results[1];
+    final primarySucceeded = await _refreshPrimarySafely();
+    final fallbackSucceeded = await _refreshFallbackSafely();
     _logStartupProviderResult(
       source: ExchangeRateSource.twelveData,
       succeeded: primarySucceeded,
@@ -172,7 +298,9 @@ class ExchangeRateService {
       succeeded: fallbackSucceeded,
     );
     await _updateMode();
-    _schedulePrimaryRefresh(_primaryRefreshInterval);
+    _schedulePrimaryRefresh(
+      _refreshDelay(_primaryRefreshInterval, _primaryFailures),
+    );
     _scheduleFallbackRefresh(_fallbackDelayAfterAttempt(fallbackSucceeded));
     BotLog.info(
       'exchange_rate initialization_completed pair=USD_RUB '
@@ -182,15 +310,17 @@ class ExchangeRateService {
 
   Duration _remainingUntilFallbackRefresh(StoredExchangeRate? stored) {
     if (stored == null) return Duration.zero;
-    final elapsed = _clock().toUtc().difference(stored.sourceUpdatedAt);
+    final elapsed = _clock().toUtc().difference(stored.fetchedAt);
     if (elapsed >= _fallbackRefreshInterval) return Duration.zero;
     if (elapsed.isNegative) return _fallbackRefreshInterval;
     return _fallbackRefreshInterval - elapsed;
   }
 
   Duration _fallbackDelayAfterAttempt(bool succeeded) {
-    if (!succeeded) return _fallbackRetryInterval;
-    final stored = _store.findUsdToRub(ExchangeRateSource.exchangeRateApi);
+    if (!succeeded) {
+      return _refreshDelay(_fallbackRetryInterval, _fallbackFailures);
+    }
+    final stored = _safeFind(ExchangeRateSource.exchangeRateApi);
     final remaining = _remainingUntilFallbackRefresh(stored);
     return remaining > Duration.zero ? remaining : _fallbackRetryInterval;
   }
@@ -201,7 +331,9 @@ class ExchangeRateService {
     _primaryRefreshTimer = Timer(delay, () async {
       await _refreshPrimarySafely();
       await _updateMode();
-      _schedulePrimaryRefresh(_primaryRefreshInterval);
+      _schedulePrimaryRefresh(
+        _refreshDelay(_primaryRefreshInterval, _primaryFailures),
+      );
     });
   }
 
@@ -218,8 +350,12 @@ class ExchangeRateService {
   Future<bool> _refreshPrimarySafely() async {
     try {
       await _refreshPrimaryRate();
+      _primaryFailures = 0;
+      _lastPrimaryError = null;
       return true;
     } on ExchangeRateException catch (error) {
+      _primaryFailures++;
+      _lastPrimaryError = error;
       _logRefreshFailure(ExchangeRateSource.twelveData, error);
       return false;
     }
@@ -228,8 +364,12 @@ class ExchangeRateService {
   Future<bool> _refreshFallbackSafely() async {
     try {
       await _refreshFallbackRate();
+      _fallbackFailures = 0;
+      _lastFallbackError = null;
       return true;
     } on ExchangeRateException catch (error) {
+      _fallbackFailures++;
+      _lastFallbackError = error;
       _logRefreshFailure(ExchangeRateSource.exchangeRateApi, error);
       return false;
     }
@@ -262,12 +402,14 @@ class ExchangeRateService {
         ExchangeRateSource.twelveData => await _fetchTwelveDataRate(),
         ExchangeRateSource.exchangeRateApi => await _fetchExchangeRateApiRate(),
       };
+      _validateCandidate(source, result);
       _store.saveUsdToRub(
         source: source,
         rate: result.rate,
         sourceUpdatedAt: result.sourceUpdatedAt,
         fetchedAt: _clock().toUtc(),
       );
+      _lastRejections.remove(source);
       BotLog.debug(
         'exchange_rate valid_rate_stored pair=USD_RUB source=${source.name}',
       );
@@ -285,6 +427,11 @@ class ExchangeRateService {
       throw const ExchangeRateException(
         kind: ExchangeRateErrorKind.network,
         message: 'Exchange rate HTTP request failed',
+      );
+    } on ExchangeRateStoreException {
+      throw const ExchangeRateException(
+        kind: ExchangeRateErrorKind.storage,
+        message: 'Exchange rate storage operation failed',
       );
     } on ExchangeRateException {
       rethrow;
@@ -365,6 +512,69 @@ class ExchangeRateService {
     );
   }
 
+  void _validateCandidate(
+    ExchangeRateSource source,
+    _FetchedExchangeRate candidate,
+  ) {
+    ExchangeRateException? rejection;
+    if (candidate.rate < _minimumRate || candidate.rate > _maximumRate) {
+      rejection = const ExchangeRateException(
+        kind: ExchangeRateErrorKind.suspiciousRate,
+        message: 'USD/RUB rate is outside the configured safe range',
+      );
+    } else if (!_isAgeAllowed(
+      candidate.sourceUpdatedAt,
+      source == ExchangeRateSource.twelveData
+          ? _primarySourceMaximumAge
+          : _absoluteMaximumAge,
+    )) {
+      rejection = const ExchangeRateException(
+        kind: ExchangeRateErrorKind.staleRate,
+        message: 'Exchange rate provider returned a stale timestamp',
+      );
+    } else {
+      final previous = _safeFind(source);
+      final other = _safeFind(_otherSource(source));
+      final changedTooMuch =
+          previous != null &&
+          _percentageDifference(candidate.rate, previous.rate) >
+              _maximumChangePercent;
+      final otherIsUsable = other != null && _isWithinAbsoluteMaximumAge(other);
+      final differsFromOther =
+          otherIsUsable &&
+          _percentageDifference(candidate.rate, other.rate) >
+              _maximumProviderDifferencePercent;
+      if (differsFromOther) {
+        rejection = const ExchangeRateException(
+          kind: ExchangeRateErrorKind.providerMismatch,
+          message: 'USD/RUB providers returned conflicting rates',
+        );
+      } else if (changedTooMuch && !otherIsUsable) {
+        rejection = const ExchangeRateException(
+          kind: ExchangeRateErrorKind.suspiciousRate,
+          message: 'Large USD/RUB rate change is not confirmed',
+        );
+      }
+    }
+
+    if (rejection == null) return;
+    try {
+      _store.saveRejectedUsdToRub(
+        source: source,
+        rate: candidate.rate,
+        sourceUpdatedAt: candidate.sourceUpdatedAt,
+        fetchedAt: _clock().toUtc(),
+        reason: rejection.kind.name,
+      );
+    } on ExchangeRateStoreException catch (error) {
+      BotLog.error(
+        'exchange_rate rejected_observation_write_failed '
+        'source=${source.name} error=${error.runtimeType}',
+      );
+    }
+    throw rejection;
+  }
+
   void _validateHttpResponse({
     required http.Response response,
     required Map<String, dynamic>? payload,
@@ -431,16 +641,32 @@ class ExchangeRateService {
   }
 
   _RateSelection _selectRate() {
-    final primary = _store.findUsdToRub(ExchangeRateSource.twelveData);
-    final fallback = _store.findUsdToRub(ExchangeRateSource.exchangeRateApi);
-    if (primary != null && _isPrimaryFresh(primary)) {
+    final primary = _safeFind(ExchangeRateSource.twelveData);
+    final fallback = _safeFind(ExchangeRateSource.exchangeRateApi);
+    if (primary != null && _isFresh(primary, _primaryMaximumAge)) {
       return _RateSelection(_ExchangeRateMode.primary, primary);
     }
-    if (fallback != null) {
+    if (fallback != null && _isFresh(fallback, _fallbackMaximumAge)) {
       return _RateSelection(_ExchangeRateMode.fallback, fallback);
     }
-    if (primary != null) {
-      return _RateSelection(_ExchangeRateMode.emergencyPrimary, primary);
+    final emergency = [primary, fallback]
+        .whereType<StoredExchangeRate>()
+        .where(_isWithinAbsoluteMaximumAge)
+        .fold<StoredExchangeRate?>(
+          null,
+          (latest, rate) =>
+              latest == null || rate.fetchedAt.isAfter(latest.fetchedAt)
+              ? rate
+              : latest,
+        );
+    if (emergency != null) {
+      return _RateSelection(_ExchangeRateMode.emergency, emergency);
+    }
+    if (primary != null || fallback != null) {
+      throw const ExchangeRateException(
+        kind: ExchangeRateErrorKind.staleRate,
+        message: 'All confirmed USD/RUB exchange rates are too old',
+      );
     }
     throw const ExchangeRateException(
       kind: ExchangeRateErrorKind.missingRubRate,
@@ -448,8 +674,57 @@ class ExchangeRateService {
     );
   }
 
-  bool _isPrimaryFresh(StoredExchangeRate primary) {
-    return _clock().toUtc().difference(primary.fetchedAt) <= _primaryMaximumAge;
+  bool _isFresh(StoredExchangeRate stored, Duration maximumFetchedAge) {
+    final maximumSourceAge = stored.source == ExchangeRateSource.twelveData
+        ? _primarySourceMaximumAge
+        : _absoluteMaximumAge;
+    return _isAgeAllowed(stored.fetchedAt, maximumFetchedAge) &&
+        _isAgeAllowed(stored.sourceUpdatedAt, maximumSourceAge);
+  }
+
+  bool _isWithinAbsoluteMaximumAge(StoredExchangeRate stored) {
+    return _isAgeAllowed(stored.fetchedAt, _absoluteMaximumAge) &&
+        _isAgeAllowed(stored.sourceUpdatedAt, _absoluteMaximumAge);
+  }
+
+  bool _isAgeAllowed(DateTime timestamp, Duration maximumAge) {
+    final age = _clock().toUtc().difference(timestamp.toUtc());
+    if (age.isNegative) return -age <= _allowedClockSkew;
+    return age <= maximumAge;
+  }
+
+  StoredExchangeRate? _safeFind(ExchangeRateSource source) {
+    try {
+      return _store.findUsdToRub(source);
+    } on ExchangeRateStoreException catch (error) {
+      BotLog.error(
+        'exchange_rate storage_read_failed source=${source.name} '
+        'error=${error.runtimeType}',
+      );
+      if (_lastRejections[source] != ExchangeRateErrorKind.storage) {
+        _lastRejections[source] = ExchangeRateErrorKind.storage;
+        unawaited(
+          _notifier.notifyRateRejected(
+            source: source,
+            reason: ExchangeRateErrorKind.storage.name,
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
+  Duration _refreshDelay(Duration base, int failures) {
+    if (failures <= 0) return base;
+    final exponent = min(failures - 1, 4);
+    final multiplier = 1 << exponent;
+    final rawMilliseconds = base.inMilliseconds * multiplier;
+    final cappedMilliseconds = min(
+      rawMilliseconds,
+      const Duration(hours: 24).inMilliseconds,
+    );
+    final jitter = 0.9 + _random.nextDouble() * 0.2;
+    return Duration(milliseconds: (cappedMilliseconds * jitter).round());
   }
 
   Future<void> _updateMode() {
@@ -463,17 +738,22 @@ class ExchangeRateService {
 
   Future<void> _updateModeInternal() async {
     try {
-      await _applyMode(_selectRate());
+      _applyMode(_selectRate());
     } on ExchangeRateException catch (error) {
-      if (error.kind == ExchangeRateErrorKind.missingRubRate) {
+      if (error.kind == ExchangeRateErrorKind.missingRubRate ||
+          error.kind == ExchangeRateErrorKind.staleRate) {
         BotLog.error('exchange_rate no_confirmed_rate pair=USD_RUB');
+        if (_lastMode != _ExchangeRateMode.unavailable) {
+          _lastMode = _ExchangeRateMode.unavailable;
+          unawaited(_notifier.notifyUnavailable(error.kind.name));
+        }
         return;
       }
       rethrow;
     }
   }
 
-  Future<void> _applyMode(_RateSelection selection) async {
+  void _applyMode(_RateSelection selection) {
     final previous = _lastMode;
     if (previous == selection.mode) return;
     _lastMode = selection.mode;
@@ -481,15 +761,19 @@ class ExchangeRateService {
     switch (selection.mode) {
       case _ExchangeRateMode.primary:
         if (previous != null && previous != _ExchangeRateMode.primary) {
-          await _notifier.notifyPrimaryRestored(selection.rate);
+          unawaited(_notifier.notifyPrimaryRestored(selection.rate));
         }
       case _ExchangeRateMode.fallback:
-        await _notifier.notifyFallbackActivated(
-          fallback: selection.rate,
-          primary: _store.findUsdToRub(ExchangeRateSource.twelveData),
+        unawaited(
+          _notifier.notifyFallbackActivated(
+            fallback: selection.rate,
+            primary: _safeFind(ExchangeRateSource.twelveData),
+          ),
         );
-      case _ExchangeRateMode.emergencyPrimary:
-        await _notifier.notifyEmergencyRateActivated(selection.rate);
+      case _ExchangeRateMode.emergency:
+        unawaited(_notifier.notifyEmergencyRateActivated(selection.rate));
+      case _ExchangeRateMode.unavailable:
+        break;
     }
   }
 
@@ -502,13 +786,23 @@ class ExchangeRateService {
       'kind=${error.kind.name} status=${error.statusCode ?? 'none'} '
       'api_error=${error.apiErrorType ?? 'none'}',
     );
+    if (error.kind == ExchangeRateErrorKind.suspiciousRate ||
+        error.kind == ExchangeRateErrorKind.providerMismatch ||
+        error.kind == ExchangeRateErrorKind.staleRate) {
+      if (_lastRejections[source] != error.kind) {
+        _lastRejections[source] = error.kind;
+        unawaited(
+          _notifier.notifyRateRejected(source: source, reason: error.kind.name),
+        );
+      }
+    }
   }
 
   void _logStartupProviderResult({
     required ExchangeRateSource source,
     required bool succeeded,
   }) {
-    final stored = _store.findUsdToRub(source);
+    final stored = _safeFind(source);
     BotLog.info(
       'exchange_rate provider_check source=${source.name} '
       'status=${succeeded ? 'success' : 'error'} '
@@ -524,18 +818,111 @@ class ExchangeRateService {
     }
   }
 
-  void close() {
+  ExchangeRateStatus get status {
+    final primary = _safeFind(ExchangeRateSource.twelveData);
+    final fallback = _safeFind(ExchangeRateSource.exchangeRateApi);
+    try {
+      final selection = _selectRate();
+      final snapshot = _snapshotFromSelection(selection);
+      return ExchangeRateStatus(
+        mode: snapshot.mode,
+        activeSource: snapshot.source,
+        primary: primary,
+        fallback: fallback,
+        primaryFailures: _primaryFailures,
+        fallbackFailures: _fallbackFailures,
+        lastPrimaryError: _lastPrimaryError,
+        lastFallbackError: _lastFallbackError,
+      );
+    } on ExchangeRateException {
+      return ExchangeRateStatus(
+        mode: ExchangeRateMode.unavailable,
+        primary: primary,
+        fallback: fallback,
+        primaryFailures: _primaryFailures,
+        fallbackFailures: _fallbackFailures,
+        lastPrimaryError: _lastPrimaryError,
+        lastFallbackError: _lastFallbackError,
+      );
+    }
+  }
+
+  ExchangeRateSnapshot _snapshotFromSelection(_RateSelection selection) {
+    return ExchangeRateSnapshot(
+      source: selection.rate.source,
+      rateMicros: selection.rate.rateMicros,
+      sourceUpdatedAt: selection.rate.sourceUpdatedAt,
+      fetchedAt: selection.rate.fetchedAt,
+      mode: switch (selection.mode) {
+        _ExchangeRateMode.primary => ExchangeRateMode.primary,
+        _ExchangeRateMode.fallback => ExchangeRateMode.fallback,
+        _ExchangeRateMode.emergency => ExchangeRateMode.emergency,
+        _ExchangeRateMode.unavailable => ExchangeRateMode.unavailable,
+      },
+    );
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
     _closed = true;
     _primaryRefreshTimer?.cancel();
     _fallbackRefreshTimer?.cancel();
     _primaryRefreshTimer = null;
     _fallbackRefreshTimer = null;
+    final activeRefreshes = <Future<void>>[];
+    final primaryRefresh = _primaryRefresh;
+    final fallbackRefresh = _fallbackRefresh;
+    if (primaryRefresh != null) activeRefreshes.add(primaryRefresh);
+    if (fallbackRefresh != null) activeRefreshes.add(fallbackRefresh);
+    await Future.wait<void>(activeRefreshes).catchError((_) => <void>[]);
     _twelveDataHttpClient.close();
     _exchangeRateApiHttpClient.close();
   }
 }
 
-enum _ExchangeRateMode { primary, fallback, emergencyPrimary }
+enum _ExchangeRateMode { primary, fallback, emergency, unavailable }
+
+enum ExchangeRateMode { primary, fallback, emergency, unavailable }
+
+class ExchangeRateSnapshot {
+  const ExchangeRateSnapshot({
+    required this.source,
+    required this.rateMicros,
+    required this.sourceUpdatedAt,
+    required this.fetchedAt,
+    required this.mode,
+  });
+
+  final ExchangeRateSource source;
+  final int rateMicros;
+  final DateTime sourceUpdatedAt;
+  final DateTime fetchedAt;
+  final ExchangeRateMode mode;
+
+  double get rate => rateMicros / 1000000;
+}
+
+class ExchangeRateStatus {
+  const ExchangeRateStatus({
+    required this.mode,
+    required this.primary,
+    required this.fallback,
+    required this.primaryFailures,
+    required this.fallbackFailures,
+    required this.lastPrimaryError,
+    required this.lastFallbackError,
+    this.activeSource,
+  });
+
+  final ExchangeRateMode mode;
+  final ExchangeRateSource? activeSource;
+  final StoredExchangeRate? primary;
+  final StoredExchangeRate? fallback;
+  final int primaryFailures;
+  final int fallbackFailures;
+  final ExchangeRateException? lastPrimaryError;
+  final ExchangeRateException? lastFallbackError;
+}
 
 class _RateSelection {
   const _RateSelection(this.mode, this.rate);
@@ -601,13 +988,51 @@ Duration _validatePrimaryMaximumAge(
   return maximumAge;
 }
 
-void _validateUsdAmount(double amount) {
-  if (!amount.isFinite || amount <= 0) {
-    throw const ExchangeRateException(
-      kind: ExchangeRateErrorKind.invalidAmount,
-      message: 'USD amount must be a positive finite number',
+Duration _validateMaximumAge(
+  Duration maximumAge,
+  Duration absoluteMaximumAge,
+  String name,
+) {
+  _validateDuration(maximumAge, name);
+  if (maximumAge > absoluteMaximumAge) {
+    throw ExchangeRateException(
+      kind: ExchangeRateErrorKind.configuration,
+      message: '$name must not exceed absoluteMaximumAge',
     );
   }
+  return maximumAge;
+}
+
+double _validatePositiveNumber(double value, String name) {
+  if (!value.isFinite || value <= 0) {
+    throw ExchangeRateException(
+      kind: ExchangeRateErrorKind.configuration,
+      message: '$name must be a positive finite number',
+    );
+  }
+  return value;
+}
+
+double _validateRateMaximum(double maximum, double minimum) {
+  _validatePositiveNumber(maximum, 'maximumRate');
+  if (maximum <= minimum) {
+    throw const ExchangeRateException(
+      kind: ExchangeRateErrorKind.configuration,
+      message: 'maximumRate must be greater than minimumRate',
+    );
+  }
+  return maximum;
+}
+
+double _parseConfiguredDouble(String raw, String name) {
+  final value = double.tryParse(raw);
+  if (value == null || !value.isFinite || value <= 0) {
+    throw ExchangeRateException(
+      kind: ExchangeRateErrorKind.configuration,
+      message: '$name must be a positive finite number',
+    );
+  }
+  return value;
 }
 
 double? _parsePositiveDouble(Object? value) {
@@ -639,4 +1064,13 @@ String _safeApiErrorType(Object? value) {
       .trim();
   if (normalized == null || normalized.isEmpty) return 'unknown';
   return normalized.length <= 100 ? normalized : normalized.substring(0, 100);
+}
+
+ExchangeRateSource _otherSource(ExchangeRateSource source) => switch (source) {
+  ExchangeRateSource.twelveData => ExchangeRateSource.exchangeRateApi,
+  ExchangeRateSource.exchangeRateApi => ExchangeRateSource.twelveData,
+};
+
+double _percentageDifference(double first, double second) {
+  return ((first - second).abs() / second) * 100;
 }

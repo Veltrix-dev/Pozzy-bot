@@ -1,7 +1,11 @@
+import 'dart:math';
+
 import 'package:pozzy_bot/app/labels/button/purchase/stars/stars_purchase_callbacks.dart';
 import 'package:pozzy_bot/app/labels/message/purchase/common/fragment_purchase_result_text.dart';
 import 'package:pozzy_bot/app/labels/message/purchase/stars/stars_purchase_text.dart';
 import 'package:pozzy_bot/database/models/fragment_purchase_type.dart';
+import 'package:pozzy_bot/database/models/rub_amount.dart';
+import 'package:pozzy_bot/config/config.dart';
 import 'package:pozzy_bot/handler/purchase/recipient/recipient_selection_handler.dart';
 import 'package:pozzy_bot/handler/reply_handler.dart';
 import 'package:pozzy_bot/keyboards/stars/stars_amount_keyboard.dart';
@@ -11,6 +15,7 @@ import 'package:pozzy_bot/services/exchange_rate/exchange_rate_service.dart';
 import 'package:pozzy_bot/services/fragment/fragment_api_exception.dart';
 import 'package:pozzy_bot/services/fragment/fragment_pricing_service.dart';
 import 'package:pozzy_bot/services/fragment/fragment_purchase_flow_service.dart';
+import 'package:pozzy_bot/services/fragment/price_menu_session_store.dart';
 import 'package:pozzy_bot/services/telegram/menu_photo_key.dart';
 import 'package:pozzy_bot/services/user_service.dart';
 import 'package:pozzy_bot/utils/bot_log.dart';
@@ -24,12 +29,22 @@ class StarsPurchaseHandler {
     required ExchangeRateService exchangeRate,
     required FragmentPurchaseFlowService flows,
     required RecipientSelectionHandler recipientSelection,
+    Duration? menuPriceTtl,
+    DateTime Function()? clock,
+    Random? random,
   }) : _reply = reply,
        _users = users,
        _pricing = pricing,
        _exchangeRate = exchangeRate,
        _flows = flows,
-       _recipientSelection = recipientSelection;
+       _recipientSelection = recipientSelection,
+       _priceSessions = PriceMenuSessionStore(
+         ttl:
+             menuPriceTtl ??
+             Duration(seconds: Config.exchangeRateMenuPriceTtlSeconds),
+         clock: clock,
+         random: random,
+       );
 
   final ReplyHandler _reply;
   final UserService _users;
@@ -37,45 +52,69 @@ class StarsPurchaseHandler {
   final ExchangeRateService _exchangeRate;
   final FragmentPurchaseFlowService _flows;
   final RecipientSelectionHandler _recipientSelection;
-  final Map<int, Map<int, int>> _packagePricesRubByBuyer = {};
+  final PriceMenuSessionStore<Map<int, _StarsPackagePrice>> _priceSessions;
 
   Future<void> onOpen(Context ctx) async {
     final from = ctx.from;
     if (from == null) return;
     _flows.cancel(from.id);
-    _packagePricesRubByBuyer.remove(from.id);
+    final requestVersion = _priceSessions.beginLoad(from.id);
     await _users.getOrCreate(telegramId: from.id, username: from.username);
     try {
       final packagePricesRub = await _loadPackagePricesRub();
-      _packagePricesRubByBuyer[from.id] = packagePricesRub;
+      final generation = _priceSessions.completeLoad(
+        buyerTelegramId: from.id,
+        version: requestVersion,
+        value: packagePricesRub,
+      );
+      if (generation == null) return;
       await _reply.sendMenuWithPhoto(
         ctx.id,
         photo: MenuPhotoKey.buyStars,
         text: StarsPurchaseText.menu,
         replyMarkup: StarsPurchaseKeyboard(
-          packagePricesRub: packagePricesRub,
+          packagePricesRub: packagePricesRub.map(
+            (amount, price) => MapEntry(amount, price.displayedRub),
+          ),
+          generation: generation,
         ).markup,
       );
     } on FragmentApiException catch (error) {
+      if (!_priceSessions.failLoad(from.id, requestVersion)) return;
       await _handlePricingFailure(ctx, error);
     } on ExchangeRateException catch (error) {
+      if (!_priceSessions.failLoad(from.id, requestVersion)) return;
       await _handleExchangeRateFailure(ctx, error);
     }
   }
 
-  Future<void> onSelectPackage(Context ctx, int amount) async {
+  Future<void> onSelectPackage(
+    Context ctx,
+    StarsPackageSelection selection,
+  ) async {
     final from = ctx.from;
     if (from == null) return;
-    _flows.cancel(from.id);
     await _users.getOrCreate(telegramId: from.id, username: from.username);
     try {
-      final priceRub = await _takePackagePriceRub(
+      final packagePrice = _takePackagePriceRub(
         buyerTelegramId: from.id,
-        amount: amount,
+        selection: selection,
       );
-      final quote = await _pricing.quoteStars(amount);
-      _flows.startAwaitingRecipient(buyerTelegramId: from.id, quote: quote);
-      await _showSelectedQuote(ctx, quote, priceRub);
+      if (packagePrice == null) {
+        await _reply.sendText(ctx.id, FragmentPurchaseResultText.priceExpired);
+        return;
+      }
+      _flows.cancel(from.id);
+      _flows.startAwaitingRecipient(
+        buyerTelegramId: from.id,
+        quote: packagePrice.quote,
+        priceRub: packagePrice.exactRub,
+      );
+      await _showSelectedQuote(
+        ctx,
+        packagePrice.quote,
+        packagePrice.displayedRub,
+      );
     } on FragmentApiException catch (error) {
       await _handlePricingFailure(ctx, error);
     } on ExchangeRateException catch (error) {
@@ -87,7 +126,7 @@ class StarsPurchaseHandler {
     final from = ctx.from;
     if (from == null) return;
     _flows.cancel(from.id);
-    _packagePricesRubByBuyer.remove(from.id);
+    _priceSessions.remove(from.id);
     await _users.getOrCreate(telegramId: from.id, username: from.username);
     _flows.startAwaitingAmount(
       buyerTelegramId: from.id,
@@ -98,6 +137,10 @@ class StarsPurchaseHandler {
       StarsPurchaseText.enterAmount,
       replyMarkup: StarsAmountKeyboard().markup,
     );
+  }
+
+  Future<void> onExpiredPrice(Context ctx) {
+    return _reply.sendText(ctx.id, FragmentPurchaseResultText.priceExpired);
   }
 
   Future<bool> onAnyMessage(Context ctx) async {
@@ -123,9 +166,15 @@ class StarsPurchaseHandler {
 
     try {
       final quote = await _pricing.quoteStars(amount);
-      final priceRub = await _convertQuoteToRub(quote);
-      final updated = _flows.applyQuote(buyerTelegramId: from.id, quote: quote);
-      if (updated != null) await _showSelectedQuote(ctx, quote, priceRub);
+      final exactPriceRub = await _exchangeRate.convertUsdToRub(quote.price);
+      final updated = _flows.applyQuote(
+        buyerTelegramId: from.id,
+        quote: quote,
+        priceRub: exactPriceRub,
+      );
+      if (updated != null) {
+        await _showSelectedQuote(ctx, quote, exactPriceRub.roundedRub);
+      }
     } on FragmentApiException catch (error) {
       await _handlePricingFailure(ctx, error);
     } on ExchangeRateException catch (error) {
@@ -146,34 +195,34 @@ class StarsPurchaseHandler {
     await _recipientSelection.showChoice(ctx);
   }
 
-  Future<int> _convertQuoteToRub(FragmentPriceQuote quote) async {
-    final priceRub = await _exchangeRate.convertUsdToRub(
-      quote.price.toLegacyDouble(),
-    );
-    return priceRub.round();
-  }
-
-  Future<int> _takePackagePriceRub({
+  _StarsPackagePrice? _takePackagePriceRub({
     required int buyerTelegramId,
-    required int amount,
-  }) async {
-    final displayedPrices = _packagePricesRubByBuyer.remove(buyerTelegramId);
-    final displayedPrice = displayedPrices?[amount];
-    if (displayedPrice != null) return displayedPrice;
-
-    final currentPrices = await _loadPackagePricesRub();
-    final currentPrice = currentPrices[amount];
-    if (currentPrice == null) {
-      throw StateError('Missing RUB price for $amount Stars');
-    }
-    return currentPrice;
+    required StarsPackageSelection selection,
+  }) {
+    final prices = _priceSessions.take(
+      buyerTelegramId: buyerTelegramId,
+      generation: selection.generation,
+    );
+    return prices?[selection.amount];
   }
 
-  Future<Map<int, int>> _loadPackagePricesRub() async {
+  Future<Map<int, _StarsPackagePrice>> _loadPackagePricesRub() async {
+    final snapshot = await _exchangeRate.getSnapshot();
     final entries = await Future.wait(
       StarsPurchaseCallbacks.packageAmounts.map((amount) async {
         final quote = await _pricing.quoteStars(amount);
-        return MapEntry(amount, await _convertQuoteToRub(quote));
+        final exactRub = _exchangeRate.convertUsingSnapshot(
+          quote.price,
+          snapshot,
+        );
+        return MapEntry(
+          amount,
+          _StarsPackagePrice(
+            quote: quote,
+            exactRub: exactRub,
+            displayedRub: exactRub.roundedRub,
+          ),
+        );
       }),
     );
     return Map.fromEntries(entries);
@@ -185,7 +234,7 @@ class StarsPurchaseHandler {
   ) async {
     final buyerTelegramId = ctx.from!.id;
     _flows.cancel(buyerTelegramId);
-    _packagePricesRubByBuyer.remove(buyerTelegramId);
+    _priceSessions.remove(buyerTelegramId);
     BotLog.error(
       'fragment pricing_failed buyer=$buyerTelegramId type=stars '
       'kind=${error.kind.name} status=${error.statusCode ?? 'none'}',
@@ -202,7 +251,7 @@ class StarsPurchaseHandler {
   ) async {
     final buyerTelegramId = ctx.from!.id;
     _flows.cancel(buyerTelegramId);
-    _packagePricesRubByBuyer.remove(buyerTelegramId);
+    _priceSessions.remove(buyerTelegramId);
     BotLog.error(
       'fragment pricing_failed buyer=$buyerTelegramId type=stars '
       'exchange_kind=${error.kind.name} status=${error.statusCode ?? 'none'}',
@@ -212,4 +261,16 @@ class StarsPurchaseHandler {
       FragmentPurchaseResultText.serviceUnavailable,
     );
   }
+}
+
+class _StarsPackagePrice {
+  const _StarsPackagePrice({
+    required this.quote,
+    required this.exactRub,
+    required this.displayedRub,
+  });
+
+  final FragmentPriceQuote quote;
+  final RubAmount exactRub;
+  final int displayedRub;
 }

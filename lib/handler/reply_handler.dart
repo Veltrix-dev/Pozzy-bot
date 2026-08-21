@@ -1,5 +1,6 @@
 import 'dart:io' as io;
 
+import 'package:pozzy_bot/keyboards/adminMenu/admin_menu_keyboard.dart';
 import 'package:pozzy_bot/keyboards/mainMenu/main_menu_keyboards.dart';
 import 'package:pozzy_bot/services/telegram/menu_photo_key.dart';
 import 'package:pozzy_bot/services/telegram/menu_photo_service.dart';
@@ -196,6 +197,15 @@ class ReplyHandler {
       photo: MenuPhotoKey.mainMenu,
       text: text,
       replyMarkup: MainMenuKeyboards().markup,
+    );
+  }
+
+  Future<void> sendAdminMenu(ChatID chatId, {required String text}) async {
+    await sendMenuWithPhoto(
+      chatId,
+      photo: MenuPhotoKey.adminMenu,
+      text: text,
+      replyMarkup: AdminMenuKeyboard.main,
     );
   }
 

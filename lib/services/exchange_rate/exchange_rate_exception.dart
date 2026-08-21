@@ -8,6 +8,10 @@ enum ExchangeRateErrorKind {
   apiRejected,
   malformedResponse,
   missingRubRate,
+  staleRate,
+  suspiciousRate,
+  providerMismatch,
+  storage,
   unexpected,
 }
 

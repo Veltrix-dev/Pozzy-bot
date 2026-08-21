@@ -1,17 +1,30 @@
 import 'package:pozzy_bot/app/labels/id/gift_ids.dart';
 import 'package:pozzy_bot/config/config.dart';
+import 'package:pozzy_bot/database/models/rub_amount.dart';
 
-enum GiftKind { gift1, gift2, gift3, gift4, gift5, gift6, gift7, gift8 }
+enum GiftKind {
+  gift1,
+  gift2,
+  gift3,
+  gift4,
+  gift5,
+  gift6,
+  gift7,
+  gift8,
+  gift9,
+}
 
 class GiftProduct {
   const GiftProduct({
     required this.kind,
     required this.telegramGiftId,
+    required this.priceRub,
     required this.priceUsd,
   });
 
   final GiftKind kind;
   final String telegramGiftId;
+  final RubAmount priceRub;
   final double priceUsd;
 
   int get number => kind.index + 1;
@@ -23,10 +36,12 @@ abstract final class GiftCatalog {
   ];
 
   static GiftProduct productFor(GiftKind kind) {
+    final giftIndex = kind.index + 1;
     return GiftProduct(
       kind: kind,
       telegramGiftId: _giftIdFor(kind),
-      priceUsd: Config.giftPriceUsd(kind.index + 1),
+      priceRub: Config.giftPriceRub(giftIndex),
+      priceUsd: Config.giftPriceUsd(giftIndex),
     );
   }
 
@@ -40,6 +55,7 @@ abstract final class GiftCatalog {
       GiftKind.gift6 => GiftIds.gift6,
       GiftKind.gift7 => GiftIds.gift7,
       GiftKind.gift8 => GiftIds.gift8,
+      GiftKind.gift9 => GiftIds.gift9,
     };
   }
 }

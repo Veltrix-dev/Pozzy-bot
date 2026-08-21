@@ -74,9 +74,10 @@ class MainMenuHandler {
 
     final referralStats = _referrals.statsForUser(user);
     final userBalance = _balance.getBalance(user.telegramId);
-    await _reply.sendText(
+    await _reply.sendMenuWithPhoto(
       ctx.id,
-      ProfileMenuText.build(
+      photo: MenuPhotoKey.personalProfile,
+      text: ProfileMenuText.build(
         invitedCount: referralStats.invitedCount,
         earnedCommission: referralStats.commissionTotal,
         balance: userBalance.balance,

@@ -1,7 +1,8 @@
 enum MenuPhotoKey {
   mainMenu('main_menu.png', 'MENU_PHOTO_MAIN_MENU_FILE_ID'),
+  personalProfile('personal_profile_menu.png', 'MENU_PHOTO_PERSONAL_PROFILE_FILE_ID'),
   buyStars('buy_stars_menu.png', 'MENU_PHOTO_BUY_STARS_FILE_ID'),
-  buyPremium('buy_premium_menu.jpg', 'MENU_PHOTO_BUY_PREMIUM_FILE_ID'),
+  buyPremium('buy_premium_menu.png', 'MENU_PHOTO_BUY_PREMIUM_FILE_ID'),
   buyTon('buy_ton_menu.jpg', 'MENU_PHOTO_BUY_TON_FILE_ID'),
   promocod('promokod_menu.png', 'MENU_PHOTO_PROMOKOD_FILE_ID'),
   buyDeleteGift('buy_delete_gift.png', 'MENU_PHOTO_BUY_DELETE_GIFT_FILE_ID'),

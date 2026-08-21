@@ -14,6 +14,7 @@ class GiftCatalogKeyboard {
       _button(GiftCallbacks.gift6, PremiumEmojiIds.bear6),
       _button(GiftCallbacks.gift7, PremiumEmojiIds.bear7),
       _button(GiftCallbacks.gift8, PremiumEmojiIds.bear8),
+      _button(GiftCallbacks.gift9, PremiumEmojiIds.bear9),
       [
         InlineKeyboardButton(
           text: 'Назад',

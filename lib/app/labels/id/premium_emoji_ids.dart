@@ -2,6 +2,7 @@ abstract final class PremiumEmojiIds {
   static const stars = '5453900977432188793';
   static const telegramStars = '5453969572354878595';
   static const telegram3 = '5217890643321300022';
+  static const telegram2 = '5258079378159453410';
   static const premium = '5219899949281453881';
   static const ton = '5424912684078348533';
   static const profile = '5433776470080107054';
@@ -33,6 +34,7 @@ abstract final class PremiumEmojiIds {
   static const exclamationMark = '5220197908342648622';
   static const exclamationMark2 = '5258123680747116087';
   static const plus = '5393194986252542669';
+  static const wallet = '5424976816530014958';
 
   static const bear1 = '5447213743417105726';
   static const bear2 = '5393309541620291208';
@@ -42,4 +44,5 @@ abstract final class PremiumEmojiIds {
   static const bear6 = '5226661632259691727';
   static const bear7 = '5379850840691476775';
   static const bear8 = '5397583403447000427';
+  static const bear9 = '5469780137245449636';
 }

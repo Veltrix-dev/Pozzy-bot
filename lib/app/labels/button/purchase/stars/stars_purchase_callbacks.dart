@@ -10,16 +10,25 @@ abstract final class StarsPurchaseCallbacks {
   static const stars2500 = '${prefix}2500';
   static const customAmount = '${prefix}custom';
 
-  static int? packageAmount(String callbackData) => switch (callbackData) {
-    stars50 => 50,
-    stars100 => 100,
-    stars150 => 150,
-    stars250 => 250,
-    stars500 => 500,
-    stars1000 => 1000,
-    stars2500 => 2500,
-    _ => null,
-  };
+  static StarsPackageSelection? packageSelection(String callbackData) {
+    if (!callbackData.startsWith(prefix)) return null;
+    final value = callbackData.substring(prefix.length);
+    final parts = value.split(':');
+    if (parts.length != 2 || parts.first.isEmpty) return null;
+    final amount = int.tryParse(parts.last);
+    if (amount == null || !packageAmounts.contains(amount)) return null;
+    return StarsPackageSelection(generation: parts.first, amount: amount);
+  }
 
-  static String packageCallback(int amount) => '$prefix$amount';
+  static String packageCallback({
+    required String generation,
+    required int amount,
+  }) => '$prefix$generation:$amount';
+}
+
+class StarsPackageSelection {
+  const StarsPackageSelection({required this.generation, required this.amount});
+
+  final String generation;
+  final int amount;
 }

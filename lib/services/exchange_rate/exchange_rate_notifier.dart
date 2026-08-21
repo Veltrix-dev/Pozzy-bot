@@ -13,6 +13,13 @@ abstract interface class ExchangeRateNotifier {
   Future<void> notifyEmergencyRateActivated(StoredExchangeRate stored);
 
   Future<void> notifyPrimaryRestored(StoredExchangeRate primary);
+
+  Future<void> notifyUnavailable(String reason);
+
+  Future<void> notifyRateRejected({
+    required ExchangeRateSource source,
+    required String reason,
+  });
 }
 
 class SilentExchangeRateNotifier implements ExchangeRateNotifier {
@@ -29,6 +36,15 @@ class SilentExchangeRateNotifier implements ExchangeRateNotifier {
 
   @override
   Future<void> notifyPrimaryRestored(StoredExchangeRate primary) async {}
+
+  @override
+  Future<void> notifyUnavailable(String reason) async {}
+
+  @override
+  Future<void> notifyRateRejected({
+    required ExchangeRateSource source,
+    required String reason,
+  }) async {}
 }
 
 class ExchangeRateAdminNotifier implements ExchangeRateNotifier {
@@ -62,6 +78,21 @@ class ExchangeRateAdminNotifier implements ExchangeRateNotifier {
   @override
   Future<void> notifyPrimaryRestored(StoredExchangeRate primary) {
     return _send(ExchangeRateAdminText.primaryRestored(primary));
+  }
+
+  @override
+  Future<void> notifyUnavailable(String reason) {
+    return _send(ExchangeRateAdminText.unavailable(reason));
+  }
+
+  @override
+  Future<void> notifyRateRejected({
+    required ExchangeRateSource source,
+    required String reason,
+  }) {
+    return _send(
+      ExchangeRateAdminText.rateRejected(source: source, reason: reason),
+    );
   }
 
   Future<void> _send(String text) async {

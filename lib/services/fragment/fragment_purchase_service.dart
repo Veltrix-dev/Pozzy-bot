@@ -4,7 +4,6 @@ import 'dart:math';
 import 'package:pozzy_bot/database/models/fragment_order.dart';
 import 'package:pozzy_bot/database/models/fragment_order_status.dart';
 import 'package:pozzy_bot/database/models/fragment_purchase_type.dart';
-import 'package:pozzy_bot/database/models/ton_amount.dart';
 import 'package:pozzy_bot/database/repositories/fragment_order_repository.dart';
 import 'package:pozzy_bot/database/repositories/user_repositories.dart';
 import 'package:pozzy_bot/services/fragment/fragment_api_exception.dart';
@@ -26,7 +25,6 @@ enum FragmentPurchaseOutcome {
   invalidTelegramId,
   invalidStarsAmount,
   invalidPremiumDuration,
-  invalidTonAmount,
   buyerNotFound,
   idempotencyConflict,
   orderNotFound,
@@ -125,46 +123,6 @@ class FragmentPurchaseService {
     if (existing != null) return existing;
     try {
       final quote = _pricing.quotePremium(months);
-      return _createAndExecute(
-        idempotencyKey: idempotencyKey,
-        buyerTelegramId: buyerTelegramId,
-        recipientUsername: recipientUsername,
-        quote: quote,
-      );
-    } on FragmentApiException catch (error) {
-      return _configurationFailure(error);
-    }
-  }
-
-  Future<FragmentPurchaseResult> purchaseTon({
-    required String idempotencyKey,
-    required int buyerTelegramId,
-    required String recipientUsername,
-    required String amount,
-  }) async {
-    TonAmount tonAmount;
-    try {
-      tonAmount = TonAmount.parse(amount);
-    } on FormatException {
-      return const FragmentPurchaseResult(
-        outcome: FragmentPurchaseOutcome.invalidTonAmount,
-      );
-    }
-    if (tonAmount.isZero) {
-      return const FragmentPurchaseResult(
-        outcome: FragmentPurchaseOutcome.invalidTonAmount,
-      );
-    }
-    final existing = await _findExistingRequest(
-      idempotencyKey: idempotencyKey,
-      buyerTelegramId: buyerTelegramId,
-      recipientUsername: recipientUsername,
-      purchaseType: FragmentPurchaseType.ton,
-      quantityUnits: tonAmount.nano,
-    );
-    if (existing != null) return existing;
-    try {
-      final quote = _pricing.quoteTon(tonAmount);
       return _createAndExecute(
         idempotencyKey: idempotencyKey,
         buyerTelegramId: buyerTelegramId,

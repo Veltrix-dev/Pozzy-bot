@@ -168,9 +168,46 @@ abstract final class AppDatabase {
   ''');
 
     db.execute('''
+    CREATE TABLE IF NOT EXISTS ton_wallet_transfers (
+      operation_id TEXT PRIMARY KEY,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      request_identity TEXT NOT NULL,
+      buyer_telegram_id INTEGER NOT NULL,
+      recipient_address TEXT NOT NULL,
+      amount_nano INTEGER NOT NULL CHECK (amount_nano > 0),
+      price_usd_micros INTEGER NOT NULL CHECK (price_usd_micros > 0),
+      status TEXT NOT NULL CHECK (
+        status IN ('created', 'prepared', 'pending', 'completed', 'failed')
+      ),
+      signed_boc TEXT,
+      message_hash TEXT UNIQUE,
+      tx_hash TEXT,
+      error_kind TEXT,
+      error_detail TEXT,
+      balance_reserved_at TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  ''');
+
+    db.execute('''
+    CREATE INDEX IF NOT EXISTS idx_ton_wallet_transfers_status_date
+    ON ton_wallet_transfers (status, updated_at);
+  ''');
+
+    db.execute('''
     CREATE TABLE IF NOT EXISTS fragment_star_price_cache (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       usd_per_star_micros INTEGER NOT NULL CHECK (usd_per_star_micros > 0),
+      fetched_at TEXT NOT NULL
+    );
+  ''');
+
+    db.execute('''
+    CREATE TABLE IF NOT EXISTS ton_usd_price_cache (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      usd_per_ton_micros INTEGER NOT NULL CHECK (usd_per_ton_micros > 0),
       fetched_at TEXT NOT NULL
     );
   ''');
@@ -191,6 +228,56 @@ abstract final class AppDatabase {
       source_updated_at TEXT NOT NULL,
       fetched_at TEXT NOT NULL
     );
+  ''');
+
+    db.execute('''
+    CREATE TABLE IF NOT EXISTS exchange_rate_observations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      rate_micros INTEGER NOT NULL CHECK (rate_micros > 0),
+      source_updated_at TEXT NOT NULL,
+      fetched_at TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('accepted', 'rejected')),
+      rejection_reason TEXT,
+      created_at TEXT NOT NULL
+    );
+  ''');
+
+    db.execute('''
+    CREATE INDEX IF NOT EXISTS idx_exchange_rate_observations_source_date
+    ON exchange_rate_observations (source, created_at DESC);
+  ''');
+
+    db.execute('''
+    CREATE TABLE IF NOT EXISTS admin_balance_adjustments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT NOT NULL UNIQUE,
+      admin_telegram_id INTEGER NOT NULL,
+      target_telegram_id INTEGER NOT NULL,
+      amount_usd_micros INTEGER NOT NULL CHECK (amount_usd_micros > 0),
+      created_at TEXT NOT NULL
+    );
+  ''');
+
+    db.execute('''
+    CREATE INDEX IF NOT EXISTS idx_admin_balance_adjustments_target_date
+    ON admin_balance_adjustments (target_telegram_id, created_at DESC);
+  ''');
+
+    db.execute('''
+    CREATE TABLE IF NOT EXISTS admin_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      admin_telegram_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      target_telegram_id INTEGER,
+      details TEXT,
+      created_at TEXT NOT NULL
+    );
+  ''');
+
+    db.execute('''
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_log_admin_date
+    ON admin_audit_log (admin_telegram_id, created_at DESC);
   ''');
   }
 

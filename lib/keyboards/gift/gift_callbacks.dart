@@ -10,6 +10,7 @@ abstract final class GiftCallbacks {
   static const gift6 = '${prefix}6';
   static const gift7 = '${prefix}7';
   static const gift8 = '${prefix}8';
+  static const gift9 = '${prefix}9';
 
   static GiftKind? parse(String callbackData) {
     return switch (callbackData) {
@@ -21,6 +22,7 @@ abstract final class GiftCallbacks {
       gift6 => GiftKind.gift6,
       gift7 => GiftKind.gift7,
       gift8 => GiftKind.gift8,
+      gift9 => GiftKind.gift9,
       _ => null,
     };
   }

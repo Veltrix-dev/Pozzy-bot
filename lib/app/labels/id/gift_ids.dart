@@ -7,4 +7,5 @@ abstract final class GiftIds {
   static const gift6 = '5800655655995968830';
   static const gift7 = '5956217000635139069';
   static const gift8 = '5974210632977745012';
+  static const gift9 = '6046178578163303744';
 }

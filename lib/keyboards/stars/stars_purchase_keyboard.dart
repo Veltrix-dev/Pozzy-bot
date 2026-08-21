@@ -5,9 +5,13 @@ import 'package:pozzy_bot/app/labels/message/purchase/stars/stars_purchase_text.
 import 'package:televerse/telegram.dart';
 
 class StarsPurchaseKeyboard {
-  StarsPurchaseKeyboard({required this.packagePricesRub});
+  StarsPurchaseKeyboard({
+    required this.packagePricesRub,
+    required this.generation,
+  });
 
   final Map<int, int> packagePricesRub;
+  final String generation;
 
   InlineKeyboardMarkup get markup => InlineKeyboardMarkup(
     inlineKeyboard: [
@@ -42,7 +46,10 @@ class StarsPurchaseKeyboard {
     }
     return _button(
       StarsPurchaseText.packageButtonText(amount: amount, priceRub: priceRub),
-      StarsPurchaseCallbacks.packageCallback(amount),
+      StarsPurchaseCallbacks.packageCallback(
+        generation: generation,
+        amount: amount,
+      ),
     );
   }
 
